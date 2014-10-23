@@ -7,10 +7,9 @@ with file("/home/atticus/Desktop/log.txt",'w') as f:
 	f.write("")
 
 def validAscii(h):
-	if h>19 or h<127:
+	if int(h)>19 and int(h)<127:
 		return True
-	else:
-		return False
+	return False
 
 def hdecode(data):
 	a=""
