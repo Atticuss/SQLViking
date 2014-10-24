@@ -17,9 +17,10 @@ def readable(data):
 	a=""
 	for i in range(0,len(data)/2):
 		if validAscii(data[i*2:i*2+2]):
+			a+=" "+data[i*2:i*2+2].decode("hex")+" "
+		else:
 			a+=data[i*2:i*2+2]
-			#print "%s:%s:%s"%(data[i*2:i*2+2],int(data[i*2:i*2+2],16),data[i*2:i*2+2].decode("hex"))
-	return a.decode("hex")
+	return a
 
 def println(s):
 	with file("/home/atticus/Desktop/log.txt",'a') as f:
@@ -38,7 +39,6 @@ def log():
 	while True:
 		while not pkts.empty():
 			pkt=pkts.get()
-			#println("pkt\n%s\n"%pkt)
 			println("PACKET\n%s\n"%readable(str(pkt.payload.payload).encode("hex")))
 
 def main():
