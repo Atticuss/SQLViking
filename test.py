@@ -1,21 +1,24 @@
 from scapy.all import *
 from Queue import Queue
+import sys
 import threading
 import time
 
+pkts=Queue()
 with file("/home/atticus/Desktop/log.txt",'w') as f:
 	f.write("")
 
 def validAscii(h):
-	if int(h)>19 and int(h)<127:
+	if int(h,16)>31 and int(h,16)<127:
 		return True
 	return False
 
-def hdecode(data):
+def readable(data):
 	a=""
-	for i in range(0,len(data)/2-2):
-		if validAscii(data[i:i+2]):
-			a+=data[i:i+2]
+	for i in range(0,len(data)/2):
+		if validAscii(data[i*2:i*2+2]):
+			a+=data[i*2:i*2+2]
+			#print "%s:%s:%s"%(data[i*2:i*2+2],int(data[i*2:i*2+2],16),data[i*2:i*2+2].decode("hex"))
 	return a.decode("hex")
 
 def println(s):
@@ -23,25 +26,25 @@ def println(s):
 		f.write(s)
 	print s
 
-def scout(pkts):
-	while True:
-		pkt = sniff(filter="tcp and host 192.168.37.1", count=1)
-		pkts.put(pkt)
+def scout():
+	sniff(prn=pushToQueue,filter="tcp and host 192.168.37.135",store=0)
 
-def log(pkts):
+def pushToQueue(pkt):
+	global pkts
+	pkts.put(pkt)
+
+def log():
+	global pkts
 	while True:
-		while pkts.qsize()>1:
+		while not pkts.empty():
 			pkt=pkts.get()
-			try:
-				println("---PACKET---\n%s\n"%hdecode(pkt[0][TCP].load.encode("hex")))	
-			except:
-				println("PACKET ERROR\n%s\n"%pkt[0])
+			#println("pkt\n%s\n"%pkt)
+			println("PACKET\n%s\n"%readable(str(pkt.payload.payload).encode("hex")))
 
 def main():
-	pkts = Queue()
-	t1 = threading.Thread(target=scout,args=(pkts,))
+	t1 = threading.Thread(target=scout)
 	t1.start()
-	t2 = threading.Thread(target=log,args=(pkts,))
+	t2 = threading.Thread(target=log)
 	t2.start()
 
 if __name__ == "__main__":
