@@ -17,11 +17,19 @@ def readable(data):
 	a=""
 	for i in range(0,len(data)/2):
 		if validAscii(data[i*2:i*2+2]):
-			a+=" "+data[i*2:i*2+2].decode("hex")+" "
-		else:
-			a+=data[i*2:i*2+2]
+			a+=data[i*2:i*2+2].decode("hex")
+		#else:
+			#a+=data[i*2:i*2+2]
 	return a
 
+def isTDS(data):
+	if len(data)<51:
+		return False
+	tcpHeader=data[:40]
+	tdsHeader=data[41:100]
+	query=data[100:]
+	println("TCP Header:\t%s\nTotal len:\t%s\nHeader len1:\t%s\nHeader len2:\t%s\nQuery:\t%s\n"%(tcpHeader,tdsHeader[3:7],tdsHeader[15:17],tdsHeader[23:25],readable(query)))
+	
 def println(s):
 	with file("/home/atticus/Desktop/log.txt",'a') as f:
 		f.write(s)
@@ -39,7 +47,9 @@ def log():
 	while True:
 		while not pkts.empty():
 			pkt=pkts.get()
-			println("PACKET\n%s\n"%readable(str(pkt.payload.payload).encode("hex")))
+			#println("--RAW PACKET--\n%s\n"%str(pkt.payload.payload).encode("hex"))
+			#println("READABLE PACKET\n%s\n"%readable(str(pkt.payload.payload).encode("hex")))
+			isTDS(str(pkt.payload.payload).encode("hex"))
 
 def main():
 	t1 = threading.Thread(target=scout)
