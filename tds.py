@@ -6,7 +6,7 @@ import socket
 import sys
 from datetime import datetime, date, time, timedelta
 from decimal import Decimal, localcontext
-from . import tz
+import tz
 import uuid
 import six
 from six.moves import reduce
@@ -17,7 +17,7 @@ except:
     encryption_supported = False
 else:
     encryption_supported = True
-from .collate import ucs2_codec, Collation, lcid2charset, raw_collation
+from collate import ucs2_codec, Collation, lcid2charset, raw_collation
 
 logger = logging.getLogger()
 
