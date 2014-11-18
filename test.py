@@ -3,6 +3,7 @@ from Queue import Queue
 import sys
 import threading
 import time
+import pytds
 
 pkts=Queue()
 with file("/home/atticus/Desktop/log.txt",'w') as f:
@@ -33,7 +34,7 @@ def isTDS(data):
 def println(s):
 	with file("/home/atticus/Desktop/log.txt",'a') as f:
 		f.write(s)
-	print s
+	print(s)
 
 def scout():
 	sniff(prn=pushToQueue,filter="tcp and host 192.168.37.135",store=0)
@@ -42,20 +43,41 @@ def pushToQueue(pkt):
 	global pkts
 	pkts.put(pkt)
 
+def parseReq(data):
+	println("\n--Req--\n%s\n"%readable(data))
+
+def parseResp(data):
+	tdssock = pytds._TdsSocket(data)
+	try:
+		tdssock._main_session.find_result_or_done()
+		tdssock._main_session.find_result_or_done()
+	except:
+		a=1
+
+	try:
+		resp=tdssock._main_session.messages[0]['message']
+	except:
+		resp=''
+
+	for a in tdssock._main_session.results:
+		resp+=str(a)+"\n"
+	println("--Resp--\n%s"%resp)
+
 def log():
 	global pkts
 	while True:
 		while not pkts.empty():
 			pkt=pkts.get()
-			#println("--RAW PACKET--\n%s\n"%str(pkt.payload.payload).encode("hex"))
-			#println("READABLE PACKET\n%s\n"%readable(str(pkt.payload.payload).encode("hex")))
-			isTDS(str(pkt.payload.payload).encode("hex"))
-
+			if pkt.payload.payload.sport == 1433:
+				parseResp(str(pkt.payload.payload)[20:])
+			elif pkt.payload.payload.dport == 1433:
+				parseReq(str(pkt.payload.payload).encode('hex')[40:])
 def main():
 	t1 = threading.Thread(target=scout)
 	t1.start()
 	t2 = threading.Thread(target=log)
 	t2.start()
+	
 
 if __name__ == "__main__":
 	main()
