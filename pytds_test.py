@@ -1,4 +1,7 @@
-import trace, tds
+import trace
+from sys import path
+path.append("pytds/")
+import tds
             
 tracer = trace.Trace(count=False, trace=True)
 
