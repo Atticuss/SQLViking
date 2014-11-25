@@ -10,9 +10,12 @@ with file("/home/atticus/Desktop/log.txt",'w') as f:
 	f.write("")
 
 class Parse(threading.Thread):
-	def __init__(self):
+	#need to be able to set MTU from cmdline
+	def __init__(self,mtu=1500):
 		threading.Thread.__init__(self)
 		self.die = False
+		self.mtu = mtu
+		self.frag = {}
 
 	def run(self):
 		global pkts
@@ -22,9 +25,20 @@ class Parse(threading.Thread):
 
 	def parse(self,pkt):
 		if pkt.payload.payload.sport == 1433:
-			self.parseResp(str(pkt.payload.payload)[20:])
+			#reassesmble fragged pkts
+			key='%s:%s'%(pkt[IP].dst,pkt[TCP].dport)
+			if len(str(pkt[IP])) == self.mtu:
+				try:
+					self.frag[key]+=str(pkt[TCP])[20:]
+				except KeyError:
+					self.frag[key]=str(pkt[TCP])[20:]
+			else:
+				try:
+					self.parseResp(self.frag[key]+str(pkt[TCP])[20:])
+				except KeyError:
+					self.parseResp(str(pkt[TCP])[20:])
 		elif pkt.payload.payload.dport == 1433:
-			self.parseReq(str(pkt.payload.payload)[20:])
+			self.parseReq(str(pkt[TCP]).encode('hex')[40:])
 
 	def validAscii(self,h):
 		if int(h,16)>31 and int(h,16)<127:
@@ -34,16 +48,17 @@ class Parse(threading.Thread):
 	def readable(self,data):
 		a=""
 		for i in range(0,len(data)/2):
-			if validAscii(data[i*2:i*2+2]):
+			if self.validAscii(data[i*2:i*2+2]):
 				a+=data[i*2:i*2+2].decode("hex")
 			#else:
 				#a+=data[i*2:i*2+2]
 		return a
 
 	def parseReq(self,data):
-		self.println("\n--Req--\n%s\n"%readable(data.ecode('hex')))
+		self.println("\n--Req--\n%s\n"%self.readable(data))
 
 	def parseResp(self,data):
+		resp=''
 		tdssock = pytds._TdsSocket(data)
 		try:
 			while True:
@@ -58,6 +73,9 @@ class Parse(threading.Thread):
 
 		for a in tdssock._main_session.results:
 			resp+=str(a)+"\n"
+
+		if len(resp) == 0:
+			resp = 'error parsing response'
 		self.println("--Resp--\n%s"%resp)
 
 	def println(self,s):
@@ -76,7 +94,7 @@ class Scout(threading.Thread):
 	def scout(self):
 		while not self.die:
 			try:
-				sniff(prn=self.pushToQueue,filter="tcp and host 192.168.37.135",store=0,count=1,timeout=5)
+				sniff(prn=self.pushToQueue,filter="tcp and host 192.168.37.135",store=0,timeout=5)
 			except:
 				self.die = True
 
@@ -99,21 +117,21 @@ def main():
 
 	t1 = Scout()
 	t2 = Parse()
-	t3 = Pillage()
+	#t3 = Pillage()
 	t1.start()
 	t2.start()
-	t3.start()
+	#t3.start()
 
 	try:
 		while True:
 			t1.join(1)
 			t2.join(1)
-			t3.join(1)
+			#t3.join(1)
 	except KeyboardInterrupt:
 		print('\n[!] Keyboard interrupt received. Shutting down...')
 		t1.die=True
 		t2.die=True
-		t3.die=True
+		#t3.die=True
 	
 if __name__ == "__main__":
 	main()
