@@ -1,4 +1,4 @@
-import trace
+import trace, sys
 from sys import path
 path.append("pytds/")
 import tds
@@ -11,10 +11,11 @@ data = "04011baa00330100e30300120000810500000000000800a764000904d000340565006d00
 
 tdssock = tds._TdsSocket(data)
 try:
-	tdssock._main_session.find_result_or_done()
-	tdssock._main_session.find_result_or_done()
+	while True:
+		tdssock._main_session.find_result_or_done()
 except:
-	a=1
+	#print sys.exc_info()
+	pass
 
 try:
 	print tdssock._main_session.messages[0]['message']
