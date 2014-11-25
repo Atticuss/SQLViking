@@ -75,7 +75,10 @@ class Scout(threading.Thread):
 
 	def scout(self):
 		while not self.die:
-			sniff(prn=self.pushToQueue,filter="tcp and host 192.168.37.135",store=0,count=1)
+			try:
+				sniff(prn=self.pushToQueue,filter="tcp and host 192.168.37.135",store=0,count=1,timeout=5)
+			except:
+				self.die = True
 
 	def pushToQueue(self,pkt):
 		global pkts
@@ -92,25 +95,25 @@ class Pillage(threading.Thread):
 			print('Command added to queue:\n%s'%query)
 
 def main():
-	print('==Welcome to SQLViking!==\n[*] Starting up sniffer\n[*]ctrl+q to run SQL query')
+	print('==Welcome to SQLViking!==\n[*] Starting up sniffer')#\n[*]ctrl+q to run SQL query')
 
 	t1 = Scout()
 	t2 = Parse()
 	t3 = Pillage()
 	t1.start()
 	t2.start()
-	#t3.start()
+	t3.start()
 
 	try:
 		while True:
 			t1.join(1)
 			t2.join(1)
-			#t3.join(1)
+			t3.join(1)
 	except KeyboardInterrupt:
 		print('\n[!] Keyboard interrupt received. Shutting down...')
 		t1.die=True
 		t2.die=True
-		#3.die=True
+		t3.die=True
 	
 if __name__ == "__main__":
 	main()
