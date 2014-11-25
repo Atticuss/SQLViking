@@ -8,11 +8,6 @@ import pytds
 pkts=Queue()
 with file("/home/atticus/Desktop/log.txt",'w') as f:
 	f.write("")
-	
-def println(s):
-	with file("/home/atticus/Desktop/log.txt",'a') as f:
-		f.write(s)
-	print(s)
 
 class Parse(threading.Thread):
 	def __init__(self):
@@ -23,9 +18,9 @@ class Parse(threading.Thread):
 		global pkts
 		while not self.die:
 			if not pkts.empty():
-				log(pkts.get())
+				self.parse(pkts.get())
 
-	def log(self,pkt):
+	def parse(self,pkt):
 		if pkt.payload.payload.sport == 1433:
 			self.parseResp(str(pkt.payload.payload)[20:])
 		elif pkt.payload.payload.dport == 1433:
@@ -46,7 +41,7 @@ class Parse(threading.Thread):
 		return a
 
 	def parseReq(self,data):
-		println("\n--Req--\n%s\n"%readable(data.ecode('hex')))
+		self.println("\n--Req--\n%s\n"%readable(data.ecode('hex')))
 
 	def parseResp(self,data):
 		tdssock = pytds._TdsSocket(data)
@@ -63,7 +58,12 @@ class Parse(threading.Thread):
 
 		for a in tdssock._main_session.results:
 			resp+=str(a)+"\n"
-		println("--Resp--\n%s"%resp)
+		self.println("--Resp--\n%s"%resp)
+
+	def println(self,s):
+		with file("/home/atticus/Desktop/log.txt",'a') as f:
+			f.write(s)
+		print(s)
 
 class Scout(threading.Thread):
 	def __init__(self):
@@ -75,24 +75,42 @@ class Scout(threading.Thread):
 
 	def scout(self):
 		while not self.die:
-			sniff(prn=pushToQueue,filter="tcp and host 192.168.37.135",store=0,count=1)
+			sniff(prn=self.pushToQueue,filter="tcp and host 192.168.37.135",store=0,count=1)
 
 	def pushToQueue(self,pkt):
 		global pkts
 		pkts.put(pkt)
 
+class Pillage(threading.Thread):
+	def __init__(self):
+			threading.Thread.__init__(self)
+			self.die = False
+
+	def run(self):
+		while not self.die:
+			query = raw_input("[*] Enter query to run:")
+			print('Command added to queue:\n%s'%query)
+
 def main():
+	print('==Welcome to SQLViking!==\n[*] Starting up sniffer\n[*]ctrl+q to run SQL query')
+
 	t1 = Scout()
-	t1.start()
 	t2 = Parse()
+	t3 = Pillage()
+	t1.start()
 	t2.start()
+	#t3.start()
 
 	try:
-		#join threads
+		while True:
+			t1.join(1)
+			t2.join(1)
+			#t3.join(1)
 	except KeyboardInterrupt:
-		print('[!] Keyboard interrupt received. Shutting down...')
+		print('\n[!] Keyboard interrupt received. Shutting down...')
 		t1.die=True
 		t2.die=True
+		#3.die=True
 	
 if __name__ == "__main__":
 	main()
