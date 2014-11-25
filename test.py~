@@ -7,11 +7,12 @@ import pytds
 
 pkts=Queue()
 queries=Queue()
+#TODO: dynamic file for logging
 with file("/home/atticus/Desktop/log.txt",'w') as f:
 	f.write("")
 
 class Parse(threading.Thread):
-	#need to be able to set MTU from cmdline
+	#TODO: need to be able to set MTU from cmdline
 	def __init__(self,mtu=1500):
 		threading.Thread.__init__(self)
 		self.die = False
@@ -25,7 +26,7 @@ class Parse(threading.Thread):
 				self.parse(pkts.get())
 
 	def parse(self,pkt):
-		if pkt.payload.payload.sport == 1433:
+		if pkt[TCP].sport == 1433:
 			#reassesmble pkts if fragged
 			key='%s:%s'%(pkt[IP].dst,pkt[TCP].dport)
 			if len(str(pkt[IP])) == self.mtu:
@@ -35,12 +36,16 @@ class Parse(threading.Thread):
 					self.frag[key]=str(pkt[TCP])[20:]
 			else:
 				try:
-					self.parseResp(self.frag[key]+str(pkt[TCP])[20:])
+					self.parseRespSQLServ(self.frag[key]+str(pkt[TCP])[20:])
 					del self.frag[key]
 				except KeyError:
-					self.parseResp(str(pkt[TCP])[20:])
-		elif pkt.payload.payload.dport == 1433:
-			self.parseReq(str(pkt[TCP]).encode('hex')[40:])
+					self.parseRespSQLServ(str(pkt[TCP])[20:])
+		elif pkt[TCP].dport == 1433:
+			self.parseReqSQLServ(str(pkt[TCP]).encode('hex')[40:])
+		elif pkt[TCP].sport == 3306:
+			pass
+		elif pkt[TCP].dport == 3306:
+			pass
 
 	def validAscii(self,h):
 		if int(h,16)>31 and int(h,16)<127:
@@ -49,15 +54,20 @@ class Parse(threading.Thread):
 
 	def readable(self,data):
 		a=""
+		#TODO: terrible code, find better way to iterate over 2 chars at a time
 		for i in range(0,len(data)/2):
 			if self.validAscii(data[i*2:i*2+2]):
 				a+=data[i*2:i*2+2].decode("hex")
 		return a
 
-	def parseReq(self,data):
+	def parseReqMySQL(self,data):
+		self.println("\n--MySQL Req--\n")
+		self.println("Raw: %s"%data
+
+	def parseReqSQLServ(self,data):
 		self.println("\n--Req--\n%s\n"%self.readable(data))
 
-	def parseResp(self,data):
+	def parseRespSQLServ(self,data):
 		resp=''
 		tdssock = pytds._TdsSocket(data)
 		try:
@@ -168,6 +178,7 @@ def main():
 			t2.die = True
 			t3.die = True
 			break
+		#TODO: cheap hack to make sure everything prints before reprinting menu		
 		time.sleep(1)
 	
 if __name__ == "__main__":

