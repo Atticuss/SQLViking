@@ -1,0 +1,77 @@
+    1: import time as _time
+    1: from datetime import tzinfo, timedelta, datetime
+       
+    1: ZERO = timedelta(0)
+    1: HOUR = timedelta(hours=1)
+       
+       # A UTC class.
+       
+    2: class UTC(tzinfo):
+    1:     """UTC"""
+       
+    1:     def utcoffset(self, dt):
+               return ZERO
+       
+    1:     def tzname(self, dt):
+               return "UTC"
+       
+    1:     def dst(self, dt):
+               return ZERO
+       
+    1: utc = UTC()
+       
+       # A class building tzinfo objects for fixed-offset time zones.
+       # Note that FixedOffset(0, "UTC") is a different way to build a
+       # UTC tzinfo object.
+       
+    2: class FixedOffsetTimezone(tzinfo):
+    1:     """Fixed offset in minutes east from UTC."""
+       
+    1:     def __init__(self, offset, name=None):
+               self.__offset = timedelta(minutes=offset)
+               self.__name = name
+       
+    1:     def utcoffset(self, dt):
+               return self.__offset
+       
+    1:     def tzname(self, dt):
+               return self.__name
+       
+    1:     def dst(self, dt):
+               return ZERO
+       
+       
+    1: STDOFFSET = timedelta(seconds = -_time.timezone)
+    1: if _time.daylight:
+    1:     DSTOFFSET = timedelta(seconds = -_time.altzone)
+       else:
+           DSTOFFSET = STDOFFSET
+       
+    1: DSTDIFF = DSTOFFSET - STDOFFSET
+       
+    2: class LocalTimezone(tzinfo):
+       
+    1:     def utcoffset(self, dt):
+               if self._isdst(dt):
+                   return DSTOFFSET
+               else:
+                   return STDOFFSET
+       
+    1:     def dst(self, dt):
+               if self._isdst(dt):
+                   return DSTDIFF
+               else:
+                   return ZERO
+       
+    1:     def tzname(self, dt):
+               return _time.tzname[self._isdst(dt)]
+       
+    1:     def _isdst(self, dt):
+               tt = (dt.year, dt.month, dt.day,
+                     dt.hour, dt.minute, dt.second,
+                     dt.weekday(), 0, 0)
+               stamp = _time.mktime(tt)
+               tt = _time.localtime(stamp)
+               return tt.tm_isdst > 0
+       
+    1: local = LocalTimezone()
