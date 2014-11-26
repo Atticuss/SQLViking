@@ -7,3 +7,4 @@ Tool is broken up into two pieces:
 
 
 TDS (tabular data stream) parsing functionality forked from pytds: https://github.com/denisenkom/pytds
+MySQL parsing functionality forked from PyMySQL: https://github.com/PyMySQL
