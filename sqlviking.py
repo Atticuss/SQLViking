@@ -27,7 +27,7 @@ class Parse(threading.Thread):
 
     def parse(self,pkt):
         #TODO: determining parser by port. need to account for DBs on non-standard ports.
-        if pkt[TCP].sport == 1433:
+        if pkt[TCP].sport == 1433 or pkt[TCP].sport == 3306:
             #reassesmble pkts if fragged
             key='%s:%s'%(pkt[IP].dst,pkt[TCP].dport)
             if len(str(pkt[IP])) == self.mtu:
@@ -37,14 +37,18 @@ class Parse(threading.Thread):
                     self.frag[key]=str(pkt[TCP])[20:]
             else:
                 try:
-                    self.parseRespSQLServ(self.frag[key]+str(pkt[TCP])[20:])
+                    if pkt[TCP].sport == 1433:
+                        self.parseRespSQLServ(self.frag[key]+str(pkt[TCP])[20:])
+                    else:
+                        self.parseRespMySQL(self.frag[key]+str(pkt[TCP])[20:])
                     del self.frag[key]
                 except KeyError:
-                    self.parseRespSQLServ(str(pkt[TCP])[20:])
+                    if pkt[TCP].sport == 1433:
+                        self.parseRespSQLServ(str(pkt[TCP])[20:])
+                    else:
+                        self.parseRespMySQL(str(pkt[TCP])[20:])
         elif pkt[TCP].dport == 1433:
             self.parseReqSQLServ(str(pkt[TCP]).encode('hex')[40:])
-        elif pkt[TCP].sport == 3306:
-            self.parseRespMySQL(str(pkt[TCP])[20:])
         elif pkt[TCP].dport == 3306:
             self.parseReqMySQL(str(pkt[TCP]).encode('hex')[40:])
 
@@ -62,10 +66,10 @@ class Parse(threading.Thread):
         return a
 
     def formatTuple(self,t):
-    	res=''
-    	for i in t:
-    		res+="%s, "%i
-    	return res[:-2]
+        res=''
+        for i in t:
+            res+="%s, "%i
+        return res[:-2]
 
     def parseReqMySQL(self,data):
         self.logres("\n--MySQL Req--")
@@ -90,7 +94,7 @@ class Parse(threading.Thread):
     def parseRespSQLServ(self,data):
         #TODO: this is ghetto as shit. need to clean up pytds fork. also need to add ability to parse col names from query responses
         resp=''
-        tdssock = pytds._TdsSocket(data)
+        tdssock = tds._TdsSocket(data)
         try:
             while True:
                 tdssock._main_session.find_result_or_done()
