@@ -63,9 +63,16 @@ class Parse(threading.Thread):
 
 	def parseRespMySQL(self,data):
 		self.logres("\n--MySQL Resp--")
-		self.logres("\nRaw: %s\n"%data)
-		self.logres("\nASCII: %s\n"%self.readable(data))
-
+		res = connections.MySQLResult(connections.Result(data))\
+		try:
+			res.read()
+			self.logres('[*] Message:\t%s'%str(res.message))
+			self.logres('[*] Description:\t%s'%str(res.description))
+			self.logres('[*] Rows:')
+			for r in res.rows:
+				self.logres(r)
+		except:
+			self.logres('[!] Error:\t%s'%sys.exc_info()[1])
 	def parseReqSQLServ(self,data):
 		self.logres("\n--SQLServ Req--\n%s\n"%self.readable(data))
 
