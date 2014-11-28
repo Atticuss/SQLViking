@@ -1,11 +1,6 @@
 from scapy.all import *
 from Queue import Queue
-from sys import path
-import sys, threading, time
-path.append("pymysql/")
-import connections
-path.append("pytds/")
-import tds
+import sys, threading, time, pytds
 
 pkts=Queue()
 queries=Queue()
@@ -44,7 +39,7 @@ class Parse(threading.Thread):
         elif pkt[TCP].dport == 1433:
             self.parseReqSQLServ(str(pkt[TCP]).encode('hex')[40:])
         elif pkt[TCP].sport == 3306:
-            self.parseRespMySQL(str(pkt[TCP])[20:])
+            self.parseRespMySQL(str(pkt[TCP]).encode('hex')[40:])
         elif pkt[TCP].dport == 3306:
             self.parseReqMySQL(str(pkt[TCP]).encode('hex')[40:])
 
@@ -61,12 +56,6 @@ class Parse(threading.Thread):
                 a+=data[i*2:i*2+2].decode("hex")
         return a
 
-    def formatTuple(self,t):
-    	res=''
-    	for i in t:
-    		res+="%s, "%i
-    	return res[:-2]
-
     def parseReqMySQL(self,data):
         self.logres("\n--MySQL Req--")
         self.logres("\nRaw: %s\n"%data)
@@ -74,16 +63,16 @@ class Parse(threading.Thread):
 
     def parseRespMySQL(self,data):
         self.logres("\n--MySQL Resp--")
-        res = connections.MySQLResult(connections.Result(data))
+        res = connections.MySQLResult(connections.Result(data))\
         try:
             res.read()
-            self.logres('\n[*] Message:\t%s\n'%str(res.message))
-            self.logres('\n[*] Description:\t%s\n'%str(res.description))
-            self.logres('\n[*] Rows:\n')
+            self.logres('[*] Message:\t%s'%str(res.message))
+            self.logres('[*] Description:\t%s'%str(res.description))
+            self.logres('[*] Rows:')
             for r in res.rows:
-                self.logres(self.formatTuple(r))
+                self.logres(r)
         except:
-            self.logres('\n[!] Error:\t%s\n'%sys.exc_info()[1])
+            self.logres('[!] Error:\t%s'%sys.exc_info()[1])
     def parseReqSQLServ(self,data):
         self.logres("\n--SQLServ Req--\n%s\n"%self.readable(data))
 
@@ -131,7 +120,7 @@ class Scout(threading.Thread):
     def scout(self):
         while not self.die:
             try:
-                sniff(prn=self.pushToQueue,filter="tcp",store=0,timeout=5)
+                sniff(prn=self.pushToQueue,filter="tcp and host 192.168.37.133",store=0,timeout=5)
             except:
                 self.die = True
 
