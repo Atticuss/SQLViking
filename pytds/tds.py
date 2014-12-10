@@ -959,7 +959,7 @@ class _TdsWriter(object):
 
         Function returns only when entire buffer is written
         """
-        self.data += data.encode('hex')
+        self.data += data
         data_off = 0
         while data_off < len(data):
             left = len(self._buf) - self._pos
