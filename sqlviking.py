@@ -140,8 +140,8 @@ class Pillage(threading.Thread):
         while not self.die:
             if not queries.empty():
                 q = queries.get()
-                print('[*] Executing query:\t%s'%q.split('||')[0])
-                print('[*] Targetting:\t%s'%q.split('||')[1])
+                print('[*] Executing query:\t%s'%q[0])
+                print('[*] Targetting:\t%s'%q[1])
 
 def writeResults(t):
     print('[*] Enter filepath to write to:')
@@ -157,7 +157,7 @@ def pillage():
     query = raw_input("> ")
     print('[*] Enter IP:port to execute against:')
     dst = raw_input("> ")
-    queries.put(query+"||"+dst)
+    queries.put([query,dst])
 
 def parseInput(input,t):
     if input == 'w':
