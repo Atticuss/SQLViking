@@ -1,4 +1,4 @@
-import tds
+import tds,binascii
 
 #TODO: this is ghetto as shit. need to clean up pytds fork. also need to add ability to parse col names from query responses
 class Response():
@@ -28,5 +28,5 @@ class Request():
         
     def buildRequest(self,query):
         self.tdssock._main_session.submit_plain_query(query)
-        return self.tdssock._main_session._writer.data
+        return binascii.hexlify(self.tdssock._main_session._writer.data).decode('hex')
   
