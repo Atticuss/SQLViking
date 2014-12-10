@@ -5,7 +5,7 @@ import sys, threading, time
 path.append("pymysql/")
 import connections
 path.append("pytds/")
-import tds
+import response
 
 pkts=Queue()
 queries=Queue()
@@ -92,26 +92,13 @@ class Parse(threading.Thread):
         self.logres("\n--SQLServ Req--\n%s\n"%self.readable(data))
 
     def parseRespSQLServ(self,data):
-        #TODO: this is ghetto as shit. need to clean up pytds fork. also need to add ability to parse col names from query responses
-        resp=''
-        tdssock = tds._TdsSocket(data)
-        try:
-            while True:
-                tdssock._main_session.find_result_or_done()
-        except:
-            pass
-
-        for a in tdssock._main_session.results:
-            resp+=str(a)+"\n"
-
-        try:
-            resp=tdssock._main_session.messages[0]['message']
-        except:
-            pass
-
-        if len(resp) == 0:
-            resp = 'error parsing response'
-        self.logres("--SQLServ Resp--\n%s"%resp)
+        resp = response.Response(data)
+        resp.parse()
+        
+        if len(resp.results) == 0:
+            self.logres("--SQLServ Resp--\n%s"%resp.messages[0]['message'])
+        else:
+            self.logres("--SQLServ Resp--\n%s"%resp.results)
 
     def println(self):
         print(self.res)

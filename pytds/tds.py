@@ -316,7 +316,6 @@ PLP_MARKER = 0xffff
 PLP_NULL = 0xffffffffffffffff
 PLP_UNKNOWN = 0xfffffffffffffffe
 
-
 class PlpReader(object):
     """ Partially length prefixed reader
 
@@ -2879,13 +2878,9 @@ class _TdsSession(object):
         info.row_count += 1
 
         res=[]
-        f = open('out.txt','a')
         for i, curcol in enumerate(info.columns):
             curcol.value = self.row[i] = curcol.type.read(r)
-            f.write('%s\t'%str(curcol.value))
             res.append(str(curcol.value))
-        f.write('\n\n')
-        f.close()
         self.results.append(res)
 
     def process_nbcrow(self):
@@ -3096,11 +3091,11 @@ class _TdsSession(object):
                                      format(state_names[prior_state], state_names[state]))
         elif state == TDS_READING:
             # transition to READING are valid only from PENDING
-            #if self.state != TDS_PENDING:
-            #    raise InterfaceError('logic error: cannot change query state from {0} to {1}'.
-            #                         format(state_names[prior_state], state_names[state]))
-            #else:
-            self.state = state
+            if self.state != TDS_PENDING:
+                raise InterfaceError('logic error: cannot change query state from {0} to {1}'.
+                                     format(state_names[prior_state], state_names[state]))
+            else:
+                self.state = state
         elif state == TDS_IDLE:
             if prior_state == TDS_DEAD:
                 raise InterfaceError('logic error: cannot change query state from {0} to {1}'.
@@ -3898,14 +3893,14 @@ class _TdsSocket(object):
         self.data = data
         self.curs = 0
         self._main_session = _TdsSession(self, self, None)
+        self._main_session.set_state(TDS_QUERYING)
+        self._main_session.set_state(TDS_PENDING)
         if IS_TDS72_PLUS(self):
             self._type_map = _type_map72
         elif IS_TDS71_PLUS(self):
             self._type_map = _type_map71
         else:
             self._type_map = _type_map
-        with open('out.txt','w') as f:
-            f.write('')
         
     def __repr__(self):
         fmt = "<_TdsSocket tran={} mars={} tds_version={} use_tz={}>"
