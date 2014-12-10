@@ -904,6 +904,7 @@ class _TdsWriter(object):
 
     def pack(self, struct, *args):
         """ Packs and writes structure into stream """
+        #self.data += struct.pack(*args)
         self.write(struct.pack(*args))
 
     def put_byte(self, value):
@@ -959,7 +960,11 @@ class _TdsWriter(object):
 
         Function returns only when entire buffer is written
         """
+<<<<<<< HEAD
         self.data += data
+=======
+        #self.data += data
+>>>>>>> 191610e82050da67aa3f5b3fcfd7f171fd9ef062
         data_off = 0
         while data_off < len(data):
             left = len(self._buf) - self._pos
@@ -994,11 +999,11 @@ class _TdsWriter(object):
 
         :param final: True means this is the final packet in substream.
         """
-        return
         status = 1 if final else 0
         _header.pack_into(self._buf, 0, self._type, status, self._pos, 0, self._packet_no)
         self._packet_no = (self._packet_no + 1) % 256
-        self._transport.send(self._buf[:self._pos], final)
+        self.data += self._buf[:self._pos]
+        #self._transport.send(self._buf[:self._pos], final)
         self._pos = 8
 
 
@@ -3467,6 +3472,7 @@ class _TdsSession(object):
 
     _tds72_query_start = struct.Struct('<IIHQI')
 
+    #BREAK#
     def _start_query(self):
         w = self._writer
         w.pack(_TdsSession._tds72_query_start,
