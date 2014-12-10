@@ -15,7 +15,7 @@ data = "0401034200340100aa2a03b13b000001106901530051004c002000530065007200760065
 req = sqlserver.Request()
 #f = open('out.txt','w')
 #f.write(binascii.hexlify(req.buildRequest("select top 1 * from customerLogin")))
-print binascii.hexlify(req.buildRequest("select top 1 * from customerLogin"))
+print binascii.hexlify(req.buildRequest("select * from customerLogin"))
 #f.close()
 
 resp = sqlserver.Response(data)
