@@ -960,7 +960,11 @@ class _TdsWriter(object):
 
         Function returns only when entire buffer is written
         """
+<<<<<<< HEAD
+        self.data += data
+=======
         #self.data += data
+>>>>>>> 191610e82050da67aa3f5b3fcfd7f171fd9ef062
         data_off = 0
         while data_off < len(data):
             left = len(self._buf) - self._pos

