@@ -872,6 +872,7 @@ class _TdsWriter(object):
         self._pos = 0
         self._buf = bytearray(bufsize)
         self._packet_no = 0
+        self.data = ''
 
     @property
     def session(self):
@@ -958,6 +959,7 @@ class _TdsWriter(object):
 
         Function returns only when entire buffer is written
         """
+        self.data += data.encode('hex')
         data_off = 0
         while data_off < len(data):
             left = len(self._buf) - self._pos
@@ -992,6 +994,7 @@ class _TdsWriter(object):
 
         :param final: True means this is the final packet in substream.
         """
+        return
         status = 1 if final else 0
         _header.pack_into(self._buf, 0, self._type, status, self._pos, 0, self._packet_no)
         self._packet_no = (self._packet_no + 1) % 256
@@ -3080,7 +3083,10 @@ class _TdsSession(object):
         It also does state transitions checks.
         :param state: New state, one of TDS_PENDING/TDS_READING/TDS_IDLE/TDS_DEAD/TDS_QUERING
         """
+        self.state = state
         prior_state = self.state
+        return self.state
+        
         if state == prior_state:
             return state
         if state == TDS_PENDING:
@@ -3238,8 +3244,8 @@ class _TdsSession(object):
         Does nothing if no request is pending, otherwise sends cancel request,
         and waits for response.
         """
-        if self.state == TDS_IDLE:
-            return
+        #if self.state == TDS_IDLE:
+        return
         if not self.in_cancel:
             self._put_cancel()
         self.process_cancel()
@@ -3878,7 +3884,7 @@ _token_map = {
 
 
 class _TdsSocket(object):
-    def __init__(self, data, use_tz=None):
+    def __init__(self, data=None, use_tz=None):
         self._is_connected = False
         self.env = _TdsEnv()
         self.collation = None
@@ -3893,8 +3899,8 @@ class _TdsSocket(object):
         self.data = data
         self.curs = 0
         self._main_session = _TdsSession(self, self, None)
-        self._main_session.set_state(TDS_QUERYING)
-        self._main_session.set_state(TDS_PENDING)
+        #self._main_session.set_state(TDS_QUERYING)
+        #self._main_session.set_state(TDS_PENDING)
         if IS_TDS72_PLUS(self):
             self._type_map = _type_map72
         elif IS_TDS71_PLUS(self):

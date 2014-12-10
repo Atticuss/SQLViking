@@ -20,4 +20,13 @@ class Response():
         except:
             pass
         
-        self.results = self.tdssock._main_session.results    
+        self.results = self.tdssock._main_session.results
+        
+class Request():
+    def __init__(self):
+        self.tdssock = tds._TdsSocket()
+        
+    def buildRequest(self,query):
+        self.tdssock._main_session.submit_plain_query(query)
+        return self.tdssock._main_session._writer.data
+  
