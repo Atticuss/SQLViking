@@ -99,7 +99,7 @@ class Parse(threading.Thread):
     def parseRespSQLServ(self,data):
         resp = sqlserver.Response(data)
         resp.parse()
-        
+
         if len(resp.messages) > 0:
             self.logres("--SQLServ Resp--\n%s"%resp.messages[0]['message'])
         else:
@@ -120,7 +120,7 @@ class Scout(threading.Thread):
     def __init__(self):
             threading.Thread.__init__(self)
             self.die = False
-        
+
     def run(self):
         self.scout()
 
@@ -134,7 +134,7 @@ class Scout(threading.Thread):
     def pushToQueue(self,pkt):
         global pkts
         pkts.put(pkt)
-    
+
 class Pillage(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
@@ -146,7 +146,7 @@ class Pillage(threading.Thread):
             if not queries.empty():
                 q = queries.get()
                 print('[*] Executing query:\t%s'%q[0])
-                print('[*] Targetting:\t%s'%q[1])
+                print('[*] Targeting:\t%s'%q[1])
 
 def writeResults(t):
     print('[*] Enter filepath to write to:')
@@ -174,12 +174,12 @@ def parseInput(input,t):
     elif input == 'q':
         raise KeyboardInterrupt
     else:
-        print('Unknown command entered')    
+        print('Unknown command entered')
 
 def main():
     #TODO: better menu. running counter of reqs/resps capped and DBs discovered.
     print('==Welcome to SQLViking!==')
-    
+
     #send(IP(dst="192.168.37.135",src="192.168.37.1")/TCP(dport=1433,sport=9999,seq=270991360,ack=270991360)/"select top 1 * from customerLogin")
 
     t1 = Scout()
@@ -203,8 +203,8 @@ def main():
             t2.die = True
             t3.die = True
             break
-        #TODO: cheap hack to make sure everything prints before reprinting menu. need better solution. using Queue()?       
+        #TODO: cheap hack to make sure everything prints before reprinting menu. need better solution. using Queue()?
         time.sleep(1)
-    
+
 if __name__ == "__main__":
     main()
