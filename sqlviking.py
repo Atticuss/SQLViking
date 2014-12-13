@@ -1,7 +1,8 @@
+import sys,threading,time,logging,os
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 from scapy.all import *
 from Queue import Queue
 from sys import path
-import sys, threading, time
 path.append("pymysql/")
 import connections
 path.append("pytds/")
@@ -127,7 +128,7 @@ class Scout(threading.Thread):
     def scout(self):
         while not self.die:
             try:
-                sniff(prn=self.pushToQueue,filter="tcp",store=0,timeout=5)
+                sniff(prn=self.pushToQueue,filter="tcp",store=0,timeout=5,verbose=None)
             except:
                 self.die = True
 
@@ -162,12 +163,20 @@ def pillage():
     query = raw_input("> ")
     print('[*] Enter IP:port to execute against:')
     dst = raw_input("> ")
-    queries.put([query,dst])
+    print('[*] Run %s against %s? [y/n]'%(query,dst))
+    ans = raw_input("> ")
+    if ans == 'y':
+        queries.put([query,dst])
+        print('[*] Query will run as soon as possible')
+    else:
+        print('[*] Cancelling...')
+    time.sleep(3)
 
 def parseInput(input,t):
     if input == 'w':
         writeResults(t)
     elif input == 'p':
+    	#TODO: need parsing thread to save all data to a globally accessible data structure. another queue?
         t.println()
     elif input == 'r':
         pillage()
@@ -176,9 +185,25 @@ def parseInput(input,t):
     else:
         print('Unknown command entered')    
 
+def wipeScreen():
+    y,x = os.popen('stty size', 'r').read().split()
+    print('\033[1;1H')
+    for i in range(0,int(y)):
+	    print(' '*int(x))
+    print('\033[1;1H')
+
+def printMainMenu(wipe=True):
+    wipeScreen()
+    y,x = os.popen('stty size', 'r').read().split()
+    print('{{:^{}}}'.format(x).format('===Welcome to SQLViking==='))
+    print('\n[*] Menu Items:')
+    print('\tw - dump current results to file specified')
+    print('\tp - print current results to screen')
+    print('\tr - run a query against a specified DB')
+    print('\tq - quit')
+
 def main():
     #TODO: better menu. running counter of reqs/resps capped and DBs discovered.
-    print('==Welcome to SQLViking!==')
     
     #send(IP(dst="192.168.37.135",src="192.168.37.1")/TCP(dport=1433,sport=9999,seq=270991360,ack=270991360)/"select top 1 * from customerLogin")
 
@@ -190,21 +215,16 @@ def main():
     t3.start()
 
     while True:
-        print('\n\n[*] Menu Items:')
-        print('\tw - dump current results to file specified')
-        print('\tp - print current results to screen')
-        print('\tr - run a query against a specified DB')
-        print('\tq - quit')
+        printMainMenu()
         try:
-            parseInput(raw_input("> "),t2)
-        except KeyboardInterrupt:
+            parseInput(raw_input("\n> "),t2)
+        #except KeyboardInterrupt:
+        except:
             print('\n[!] Shutting down...')
             t1.die = True
             t2.die = True
             t3.die = True
             break
-        #TODO: cheap hack to make sure everything prints before reprinting menu. need better solution. using Queue()?       
-        time.sleep(1)
     
 if __name__ == "__main__":
     main()
