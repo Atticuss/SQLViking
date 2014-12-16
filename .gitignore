@@ -1,2 +1,2 @@
-/pymysql/*.pyc
-/pytds/*.pyc
+pymysql/*.pyc
+pytds/*.pyc
