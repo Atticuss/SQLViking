@@ -1,4 +1,4 @@
-import sys,threading,time,logging,os
+import sys,threading,time,logging,os,datetime
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 from scapy.all import *
 from Queue import Queue
@@ -21,22 +21,39 @@ SQLSERVREQ  = 21
 SQLSERVRESP = 22
 UNKNOWN     = 99
 
+class Traffic():
+	def __init__(self,query=None,result=None):
+		self.query = query
+		self.result = result
+		self.timestamp = datetime.datetime.now()
+
 class Conn():
-    def __init__(self,cip,cport,db):
-        self.cip = cip
-        self.cport = cport
-        self.db = db
+    def __init__(self,cip,cport,db=UNKNOWN):
+        self.cip     = cip
+        self.cport   = cport
+        self.db      = db
+        self.traffic = []
+        #unused; implement later to increase dropped/out of order packet fault tolerance
+        self.seq     = -1
+        self.ack     = -1
+        sefl.nextseq = -1
+        self.neqack  = -1
 
 class DataBase():
     def __init__(self,ip,port,name=UNKNOWN,dbtype):
-        self.ip = ip
-        self.port = port
-        self.name = name
-        self.dbtype = dbtype
+        self.ip      = ip
+        self.port    = port
+        self.name    = name
+        self.dbtype  = dbtype
         self.traffic = []
+        self.users   = [] #unused currently
+
+class DataBaseServ():
+	def __init__(self,ip):
+		self.ip = ip
 
 class Parse(threading.Thread):
-    #TODO: need to be able to set MTU from cmdline
+    #TODO: need to be able to set MTU
     def __init__(self,mtu=1500):
         threading.Thread.__init__(self)
         self.die = False
@@ -53,35 +70,33 @@ class Parse(threading.Thread):
             if not pkts.empty():
                 self.handle(pkts.get())
 
-    def parse(self,pkt,db=None):
-        pktType = UNKNOWN
-        if db:
-            if db.type == SQLSERV:
-                if pkt[IP].src == db.ip:
-                    pktType = SQLSERVRESP
-                else:
-                    pktType = SQLSERVREQ
-            elif db.type == MYSQL:
-                if pkt[IP].src == db.ip:
-                    pktType = MYSQLRESP
-                else:
-                    pktType = MYSQLREQ
-
-        if pktType != UNKNOWN:
-            pktType = self.isMySql(pkt)
+    def fingerprint(self,pkt):
+        pktType = self.isMySql(pkt)
         elif pktType != UNKNOWN:
             pktType = self.isSqlServ(pkt)
+        return pktType
+
+    def parse(self,pkt,conn):
+    	db = conn.db
+    	if db.type == SQLSERV:
+            if pkt[IP].src == db.ip:
+                pktType = SQLSERVRESP
+            else:
+                pktType = SQLSERVREQ
+        elif db.type == MYSQL:
+            if pkt[IP].src == db.ip:
+                pktType = MYSQLRESP
+            else:
+                pktType = MYSQLREQ
 
         if pktType == MYSQLREQ:
-            self.parseMySqlReq(pkt,db)
+            self.parseMySqlReq(pkt[TCP][20:],db)
         elif pktType == MYSQLRESP:
-            self.parseMySqlResp(pkt,db)
+            self.parseMySqlResp(pkt[TCP][20:],db)
         elif pktType == SQLSERVREQ:
-            self.parseSqlServReq(pkt,db)
+            self.parseSqlServReq(pkt[TCP][20:],db)
         elif pktType == SQLSERVRESP:
-            self.parseSqlServResp(pkt,db)
-
-        return pktType
+            self.parseSqlServResp(pkt[TCP][20:],db)
 
     def isMySql(self, pkt):
         pktlen = len(pkt)/2
@@ -142,6 +157,7 @@ class Parse(threading.Thread):
                 del self.knownConns[self.knownConns.index(c)]
                 break
 
+    #BROKEN: does not account for multiple schemas in a db
     def isKnownDB(self,pkt):
         for db in self.knownDBs:
             if pkt[IP].dst == db.ip and pkt[TCP].dport == dp.port:
@@ -155,11 +171,13 @@ class Parse(threading.Thread):
                 return db
 
     def addConn(self,pkt,db):
-        if pkt[IP].dst == db.port:
-            c = Conn(pkt[IP].src,pkt[TCP].sport,db)
-        else:
-            c = Conn(pkt[IP].dst,pkt[TCP].dport,db)
-        self.knownConns.append(c)
+    	if db:
+	        if pkt[IP].dst == db.port:
+	            c = Conn(pkt[IP].src,pkt[TCP].sport,db)
+	        else:
+	            c = Conn(pkt[IP].dst,pkt[TCP].dport,db)
+	        self.knownConns.append(c) 
+	        return c   	
 
     def handle(self,pkt):
         #pkt in knownConn?
@@ -168,18 +186,19 @@ class Parse(threading.Thread):
             #pkt have fin/ack?
             if pkt[TCP].flags == "FA":
                 #remove from knownConns; break
-                del self.knownConns[self.knownConns.index(c)]
+                self.delConn(c)
                 return
             #parse accordingly; break
-            self.parse(pkt,c.db)
+            self.parse(pkt,c)
             return
         
         #pkt to/from knownDB?
         db = self.isKnownDB(pkt)
         if db:
-            self.parse(pkt,db)
+    		c = self.addConn(pkt,db)
+            self.parse(pkt,c)
         #pkt a sqlserv/mysql req?
-        pktType = self.parse(pkt)
+        pktType = self.fingerprint(pkt)
         if pktType == MYSQLRESP:
             ip = pkt[IP].src
             port = pkt[TCP].sport
@@ -187,7 +206,7 @@ class Parse(threading.Thread):
         elif pktType == MYSQLREQ:
             ip = pkt[IP].dst
             port = pkt[TCP].dport
-            dbtype = MySQL
+            dbtype = MYSQL
         elif pktType == SQLSERVRESP:
             ip = pkt[IP].src
             port = pkt[TCP].sport
@@ -197,8 +216,12 @@ class Parse(threading.Thread):
             port = pkt[TCP].dport
             dbtype = SQLSERV
 
+        #create db, create conn
         if ip and port and dbtype:
             db = DataBase(ip=ip,port=port,dbtype=dbtype)
+            self.knownDBs.append(db)
+            c = self.addConn(pkt,db)
+            self.parse(pkt,c)
 
     #def parse(self,pkt):
         #TODO: determining parser by port. need to account for DBs on non-standard ports.
@@ -250,49 +273,75 @@ class Parse(threading.Thread):
             res+="%s, "%i
         return res[:-2]
 
-    def parseMySqlReq(self,data):
-        self.logres("\n--MySQL Req--\n")
-        self.logres("Raw: %s\n"%data)
-        self.logres("ASCII: %s\n"%self.readable(data))
+    #calls to store() use old method; need to fix to new params
+    #if database can be determined, create db if it doesn't exist or point to existing db
+    #if user can be determined, update db.users
+    def parseMySqlReq(self,pkt,conn):
+    	data = pkt[TCP][20:]
+        self.store("\n--MySQL Req--\n")
+        self.store("Raw: %s\n"%data)
+        self.store("ASCII: %s\n"%self.readable(data))
 
-    def parseMySqlResp(self,data):
-        self.logres("\n--MySQL Resp--\n")
+    def parseMySqlResp(self,pkt,conn):
+    	data = pkt[TCP][20:]
+        self.store("\n--MySQL Resp--\n")
         res = connections.MySQLResult(connections.Result(data))
         try:
             res.read()
-            self.logres('[*] Message:\t%s\n'%str(res.message))
-            self.logres('[*] Description:\t%s\n'%str(res.description))
-            self.logres('[*] Rows:\n')
+            self.store('[*] Message:\t%s\n'%str(res.message))
+            self.store('[*] Description:\t%s\n'%str(res.description))
+            self.store('[*] Rows:\n')
             if len(res.rows)>0:
                 for r in res.rows:
-                    self.logres(self.formatTuple(r))
-                self.logres('\n')
+                    self.store(self.formatTuple(r))
+                self.store('\n')
         except:
-            self.logres('[!] Error:\t%s\n'%sys.exc_info()[1])
-        self.logres('[*] Raw:\t%s\n'%str(data).encode('hex'))
+            self.store('[!] Error:\t%s\n'%sys.exc_info()[1])
+        self.store('[*] Raw:\t%s\n'%str(data).encode('hex'))
 
-    def parseSqlServReq(self,data):
-        self.logres("\n--SQLServ Req--\n%s\n"%self.readable(data))
+    def parseSqlServReq(self,pkt,conn):
+    	data = str(pkt[TCP][20:]).encode('hex')
+        self.store("\n--SQLServ Req--\n%s\n"%self.readable(data))
 
-    def parseSqlServResp(self,data):
+    def parseSqlServResp(self,pkt,conn):
+    	data = pkt[TCP][20:]
         resp = sqlserver.Response(data)
         resp.parse()
         
         if len(resp.messages) > 0:
-            self.logres("--SQLServ Resp--\n%s"%resp.messages[0]['message'])
+            self.store("--SQLServ Resp--\n%s"%resp.messages[0]['message'])
         else:
-            self.logres("--SQLServ Resp--\n%s"%resp.results)
+            self.store("--SQLServ Resp--\n%s"%resp.results)
 
+    #no longer functions; Parse.res attr deprecated
     def println(self):
         print(self.res)
         self.res=''
 
+    #no longer functions; Parse.res attr deprecated
     def writeln(self,path):
         with file(path,'w') as f:
             f.write(self.res)
 
-    def logres(self,s):
-        self.res+=s
+    def store(self,data,pkt,conn):
+	    if conn.db.name == UNKNOWN: 
+	    #	conn.traffic.append(res) 
+	    	if pkt[IP].src == conn.db.ip and conn.traffic[-1].result == None: #is result
+	    		conn.traffic[-1].result = data
+	    	elif pkt[IP].src == conn.db.ip: #is result, missed query
+	    		conn.traffic.append(Traffic(result=data))
+	    	else: #is query
+	    		conn.traffic.append(Traffic(query=data))
+	    else:
+	    	if len(conn.traffic) > 0:
+	    		conn.db.traffic = copy.deepcopy(conn.traffic)
+	    		conn.traffic = []
+	    	if pkt[IP].src == conn.db.ip and conn.db.traffic[-1].result == None: #is result
+	    		conn.db.traffic[-1].result = data
+	    	elif pkt[IP].src == conn.db.ip: #is result, missed query
+	    		conn.db.traffic.append(Traffic(result=data))
+	    	else: #is query
+	    		conn.db.traffic.append(Traffic(query=data))
 
 class Scout(threading.Thread):
     def __init__(self):
