@@ -213,7 +213,7 @@ class Parse(threading.Thread):
 
     def addConn(self,pkt,db):
         #if db:
-        self.printLn("[*] Creating conn:\n\tsip:sport; dip:dport; dbip:dbport - %s:%s; %s:%s; %s:%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,db.ip,db.port))
+        #self.printLn("[*] Creating conn:\n\tsip:sport; dip:dport; dbip:dbport - %s:%s; %s:%s; %s:%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,db.ip,db.port))
         if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port:
             c = Conn(pkt[IP].src,pkt[TCP].sport,db)
         elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
@@ -225,7 +225,7 @@ class Parse(threading.Thread):
 
     def delConn(self,conn):
         #self.printLn("current num of conns predelete:\t%s"%len(self.knownConns))
-        self.printLn("[*] FIN/ACK detected; deleting conn")
+        #self.printLn("[*] FIN/ACK detected; deleting conn")
         if len(conn.traffic) > 0:
             for t in conn.traffic:
                 conn.db.traffic.append(t)
@@ -233,11 +233,11 @@ class Parse(threading.Thread):
         #self.printLn("current num of conns postdelete:\t%s"%len(self.knownConns))
 
     def handle(self,pkt):
-        self.printLn("\n--[*] Pkt found--\n[*] pkt sip:sport; dip:dport - %s:%s; %s:%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport))
-        self.printLn("[*] Payload length:\t%s"%len(pkt[TCP].payload))
-        self.printLn("[*] Current known conns:\t%s"%len(self.knownConns))
+        #self.printLn("\n--[*] Pkt found--\n[*] pkt sip:sport; dip:dport - %s:%s; %s:%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport))
+        #self.printLn("[*] Payload length:\t%s"%len(pkt[TCP].payload))
+        #self.printLn("[*] Current known conns:\t%s"%len(self.knownConns))
         for c in self.knownConns:
-            self.printLn("\tcip:cport; sip:sport - %s:%s; %s:%s"%(c.cip,c.cport,c.db.ip,c.db.port))
+            #self.printLn("\tcip:cport; sip:sport - %s:%s; %s:%s"%(c.cip,c.cport,c.db.ip,c.db.port))
         
         c = self.getConn(pkt)
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
