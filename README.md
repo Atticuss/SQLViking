@@ -11,3 +11,5 @@ TDS (tabular data stream) parsing functionality forked from pytds: https://githu
 MySQL parsing functionality forked from PyMySQL: https://github.com/PyMySQL
 
 Currently only functional on Linux due to some hackery using sigs to make raw_input() non-blocking
+
+Requires: scapy, Python 2.7.x
