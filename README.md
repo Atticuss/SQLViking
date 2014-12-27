@@ -9,3 +9,5 @@ Tool is broken up into two pieces:
 TDS (tabular data stream) parsing functionality forked from pytds: https://github.com/denisenkom/pytds
 
 MySQL parsing functionality forked from PyMySQL: https://github.com/PyMySQL
+
+Currently only functional on Linux due to some hackery using sigs to make raw_input() non-blocking
