@@ -1,4 +1,4 @@
-import sys,threading,time,logging,os,datetime
+import sys,threading,time,logging,os,datetime,signal
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 from scapy.all import *
 from Queue import Queue
@@ -55,6 +55,10 @@ class DataBase():
         self.traffic = []
         self.users   = [] #unused currently
 
+
+class AlarmException(Exception):
+    pass
+
 class Parse(threading.Thread):
     #TODO: need to be able to set MTU
     def __init__(self,mtu=1500):
@@ -65,7 +69,6 @@ class Parse(threading.Thread):
         self.res = ''
         self.knownConns = []
         self.knownDBs = []
-        self.knownDBServs = []
         with open('out.txt','w') as f:
             f.write('')
 
@@ -74,6 +77,12 @@ class Parse(threading.Thread):
         while not self.die:
             if not pkts.empty():
                 self.handle(pkts.get())
+
+    def getNumConns(self):
+        return len(self.knownConns)
+
+    def getNumDBs(self):
+        return len(self.knownDBs)
 
     def fingerprint(self,pkt):
         pktType = self.isMySql(pkt)
@@ -85,31 +94,33 @@ class Parse(threading.Thread):
     	db = conn.db
         pktType = UNKNOWN
     	if db.dbtype == SQLSERV:
-            if pkt[IP].src == db.ip:
+            if pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
                 pktType = SQLSERVRESP
             else:
                 pktType = SQLSERVREQ
         elif db.dbtype == MYSQL:
-            if pkt[IP].src == db.ip:
+            if pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
+                #self.printLn("[*] is resp: pkt src IP and known DB IP:\t%s; %s"%(pkt[IP].src, db.ip))
                 pktType = MYSQLRESP
             else:
                 pktType = MYSQLREQ
+                #self.printLn("[*] is req: pkt src IP and known DB IP:\t%s; %s"%(pkt[IP].src, db.ip))
 
         if pktType == MYSQLREQ:
-            self.parseMySqlReq(str(pkt[TCP])[20:],conn)
+            self.parseMySqlReq(str(pkt[TCP].payload),conn)
         elif pktType == MYSQLRESP:
-            self.parseMySqlResp(str(pkt[TCP])[20:],conn)
+            self.parseMySqlResp(str(pkt[TCP].payload),conn)
         elif pktType == SQLSERVREQ:
-            self.parseSqlServReq(str(pkt[TCP])[20:],conn)
+            self.parseSqlServReq(str(pkt[TCP].payload),conn)
         elif pktType == SQLSERVRESP:
-            self.parseSqlServResp(str(pkt[TCP])[20:],conn)
-        else:
-            self.printLn("[*] Unidentified Packet")
-            self.printLn("[*] Raw:\t%s"%str(pkt[TCP][20:]).encode('hex'))
-            self.printLn("[*] ASCII:\t%s"%self.readable(str(pkt[TCP])[20:].encode('hex')))
+            self.parseSqlServResp(str(pkt[TCP].payload),conn)
+        #else:
+            #self.printLn("\n[*] Unidentified Packet")
+            #self.printLn("[*] Raw:\t%s"%str(pkt[TCP].payload).encode('hex'))
+            #self.printLn("[*] ASCII:\t%s"%self.readable(str(pkt[TCP].payload).encode('hex')))
 
     def isMySql(self,pkt):
-        encpkt = str(pkt[TCP])[20:].encode('hex')
+        encpkt = str(pkt[TCP].payload).encode('hex')
         pktlen = len(encpkt)/2
         lengths = []
         payloads = []
@@ -125,24 +136,41 @@ class Parse(threading.Thread):
             tlen+=l
         tlen+= len(lengths)*4
 
+        #self.printLn("[*] Lengths & tlen:\t%s; %s"%(lengths,tlen))
+        #self.printLn("[*] Payloads:\t%s"%payloads)
+        #for p in payloads:
+        #    self.printLn("[*] ASCII:\t%s"%self.readable(p))
+
         if tlen == pktlen and len(payloads) > 0:
             if self.isMySqlReq(payloads):
                 return MYSQLREQ
             elif self.isMySqlResp(payloads):
                 return MYSQLRESP
             else:
+                #self.printLn("[!] MySQL packet but not resp or req")
                 return UNKNOWN
         else:
+            #self.printLn("[!] Not a MySQL packet")
             return UNKNOWN
 
     def isMySqlReq(self,payloads):
         if payloads[0] == '0e': #COM_PING
             return True
 
+    def getMysqlCols(self,payloads):
+        c = -1 #ignore first payload
+        for p in payloads:
+            if p == "fe00002200":
+                return c
+            else:
+                c+=1
+
     def isMySqlResp(self,payloads):
         if payloads[0] == '00000002000000': #OK RESP 
             return True
         elif payloads[0][:2] == 'ff': #ERR RESP
+            return True
+        elif len(payloads[0]) == 2 and int(payloads[0], 16) == self.getMysqlCols(payloads): #Query RESP
             return True
 
     def isSqlServ(self,pkt):
@@ -161,9 +189,14 @@ class Parse(threading.Thread):
         return resp
 
     def inConn(self,c,pkt):
+        #self.printLn("[*] Comparing pkt with known conns:")
+        #self.printLn("\tpkt.srcip;pkt.sport;pkt.dstip;pkt.dport: %s;%s;%s;%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport))
+        #self.printLn("\tcon.srcip;con.sport;con.dstip;con.dport: %s;%s;%s;%s"%(c.cip,c.cport,c.db.ip,c.db.port))
         if c.cip == pkt[IP].dst and c.cport == pkt[TCP].dport and c.db.ip == pkt[IP].src and c.db.port == pkt[TCP].sport:
+            #self.printLn("\tIs a reponse")
             return RESPONSE
         elif c.cip == pkt[IP].src and c.cport == pkt[TCP].sport and c.db.ip == pkt[IP].dst and c.db.port == pkt[TCP].dport:
+            #self.printLn("\tIs a requet")
             return REQUEST
 
     def getConn(self,pkt):
@@ -173,35 +206,49 @@ class Parse(threading.Thread):
 
     def isKnownDB(self,pkt):
         for db in self.knownDBs:
-            if pkt[IP].dst == db.ip and pkt[TCP].dport == dp.port and db.name == UNKNOWN:
+            if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port and db.name == UNKNOWN:
                 return db
             if pkt[IP].src == db.ip and pkt[TCP].sport == db.port and db.name == UNKNOWN:
                 return db
 
     def addConn(self,pkt,db):
-        if db:
-            if pkt[IP].dst == db.port:
-                c = Conn(pkt[IP].src,pkt[TCP].sport,db)
-            else:
-                c = Conn(pkt[IP].dst,pkt[TCP].dport,db)
-            self.knownConns.append(c) 
-            return c   	
+        #if db:
+        self.printLn("[*] Creating conn:\n\tsip:sport; dip:dport; dbip:dbport - %s:%s; %s:%s; %s:%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,db.ip,db.port))
+        if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port:
+            c = Conn(pkt[IP].src,pkt[TCP].sport,db)
+        elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
+            c = Conn(pkt[IP].dst,pkt[TCP].dport,db)
+        else:
+            self.printLn("[!] Attempted to add bad conn")
+        self.knownConns.append(c) 
+        return c   	
 
     def delConn(self,conn):
+        #self.printLn("current num of conns predelete:\t%s"%len(self.knownConns))
+        self.printLn("[*] FIN/ACK detected; deleting conn")
         if len(conn.traffic) > 0:
             for t in conn.traffic:
                 conn.db.traffic.append(t)
         self.knownConns.remove(conn)
+        #self.printLn("current num of conns postdelete:\t%s"%len(self.knownConns))
 
     def handle(self,pkt):
+        self.printLn("\n--[*] Pkt found--\n[*] pkt sip:sport; dip:dport - %s:%s; %s:%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport))
+        self.printLn("[*] Payload length:\t%s"%len(pkt[TCP].payload))
+        self.printLn("[*] Current known conns:\t%s"%len(self.knownConns))
+        for c in self.knownConns:
+            self.printLn("\tcip:cport; sip:sport - %s:%s; %s:%s"%(c.cip,c.cport,c.db.ip,c.db.port))
+        
         c = self.getConn(pkt)
-        if c:
-            if pkt[TCP].flags == "FA":
-                self.delConn(c)
-                return
+        if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
+            self.delConn(c)
+            return
+        elif len(pkt[TCP].payload) == 0: #empty pkt, no reason to parse
+            return
+        elif c:
             self.parse(pkt,c)
             return
-        
+
         db = self.isKnownDB(pkt)
         if db:
             c = self.addConn(pkt,db)
@@ -209,7 +256,6 @@ class Parse(threading.Thread):
             return
 
         pktType = self.fingerprint(pkt)
-        self.printLn("[*] Pkt found:\t%s"%pktType)
         ip, port, dbType = None, None, None
         if ISRESP(pktType):
             ip = pkt[IP].src
@@ -228,9 +274,7 @@ class Parse(threading.Thread):
             self.knownDBs.append(db)
             c = self.addConn(pkt,db)
             self.parse(pkt,c)
-        else:
-            self.printLn("ip and port and dbtype not successfully set:\t%s, %s, %s"%(ip,port,dbType))
-
+        
     #def parse(self,pkt):
         #TODO: determining parser by port. need to account for DBs on non-standard ports.
         #print '\nSource:\t%s\nTCP Val:\t%s\nAck:\t%s\nSeq:\t%s\n'%(pkt[IP].src,str(pkt[TCP]).encode('hex'),pkt[TCP].ack,pkt[TCP].seq)
@@ -290,6 +334,7 @@ class Parse(threading.Thread):
     #if user can be determined, update db.users
     def parseMySqlReq(self,data,conn):
         self.printLn("\n--MySQL Req--\n")
+        self.printLn("Payload len:\t%s"%len(data))
         data = data.encode('hex')
         pktlen = len(data)/2
         lengths=[]
@@ -304,6 +349,7 @@ class Parse(threading.Thread):
 
     def parseMySqlResp(self,data,conn):
         self.printLn("\n--MySQL Resp--\n")
+        self.printLn("Payload len:\t%s"%len(data))
         #self.store('[*] Raw:\t%s'%str(data).encode('hex'))
         encdata = data.encode('hex')
         pktlen = len(encdata)/2
@@ -329,7 +375,7 @@ class Parse(threading.Thread):
         self.printLn('[*] Raw:\t%s\n'%str(data).encode('hex'))
 
     def parseSqlServReq(self,pkt,conn):
-    	data = str(pkt[TCP][20:]).encode('hex')
+    	data = str(pkt[TCP])[20:].encode('hex')
         self.store("\n--SQLServ Req--\n%s\n"%self.readable(data))
 
     def parseSqlServResp(self,pkt,conn):
@@ -444,10 +490,29 @@ def wipeScreen():
         print(' '*int(x))
     print('\033[1;1H')
 
-def printMainMenu(wipe=True):
-    wipeScreen()
-    y,x = os.popen('stty size', 'r').read().split()
+def alarmHandler(signum, frame):
+    raise AlarmException
+
+def nonBlockingRawInput(t, prompt='> ', timeout=5):
+    signal.signal(signal.SIGALRM, alarmHandler)
+    signal.alarm(timeout)
+    try:
+        text = raw_input(prompt)
+        signal.alarm(0)
+        return text
+    except AlarmException:
+        printMainMenu(t)
+    signal.signal(signal.SIGALRM,signal.SIG_IGN)
+    return ''
+
+def printMainMenu(t,wipe=True):
+    if wipe:
+        wipeScreen()
+        y,x = os.popen('stty size', 'r').read().split()
+    
     print('{{:^{}}}'.format(x).format('===Welcome to SQLViking==='))
+    print('\n[*] Current number of known DBs:\t\t%s'%t.getNumDBs())
+    print('[*] Current number of known connections:\t%s'%t.getNumConns())
     print('\n[*] Menu Items:')
     print('\tw - dump current results to file specified')
     #TODO: menu printing wipes all printed data
@@ -466,10 +531,9 @@ def main():
     t3.start()
 
     while True:
-        #printMainMenu()
+        printMainMenu(t2)
         try:
-            #parseInput(raw_input("\n> "),t2)
-            time.sleep(1)
+            nonBlockingRawInput(t2)
         except KeyboardInterrupt:
             print('\n[!] Shutting down...')
             t1.die = True
