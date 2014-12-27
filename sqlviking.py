@@ -47,14 +47,38 @@ class Conn():
         self.neqack  = -1
 
 class DataBase():
-    def __init__(self,ip,port,dbtype,name=UNKNOWN):
+    def __init__(self,ip,port,dbType,name=UNKNOWN):
         self.ip      = ip
         self.port    = port
         self.name    = name
-        self.dbtype  = dbtype
+        self.dbType  = dbType
         self.traffic = []
         self.users   = [] #unused currently
 
+    def getType(self):
+        if ISMYSQL(self.dbType):
+            return 'MySQL'
+        elif ISSQLSERV(self.dbType):
+            return 'SQL Server'
+        else:
+            return 'Unknown'
+
+    def status(self):
+        res = "---%s:%s---\n"%(self.ip,self.port)
+        res += "Type:\t%s\n"% self.getType()
+        res += "Users:\t"
+        if len(self.users) > 0:
+            for u in self.users:
+                res += u+", "
+            res = res[:-2]+"\n"
+        else:
+            res += "no users identified yet\n"
+        res += "Schema:\t%s"%self.name
+        res += "\nIdentified traffic:\n"
+        for t in self.traffic:
+            res += 'Query:\t%s\n'%t.query
+            res += 'Response:\n%s\n'%t.result
+        return res
 
 class AlarmException(Exception):
     pass
@@ -78,6 +102,13 @@ class Parse(threading.Thread):
             if not pkts.empty():
                 self.handle(pkts.get())
 
+    def dumpResults(self,outfile):
+        with open(outfile, 'w') as f:
+            f.write('\t\t===SQLViking Results===\n\n')
+        with open(outfile,'a') as f:
+            for db in self.knownDBs:
+                f.write(db.status()+'\n'+'~'*80+'\n')
+
     def getNumConns(self):
         return len(self.knownConns)
 
@@ -93,12 +124,12 @@ class Parse(threading.Thread):
     def parse(self,pkt,conn):
     	db = conn.db
         pktType = UNKNOWN
-    	if db.dbtype == SQLSERV:
+    	if db.dbType == SQLSERV:
             if pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
                 pktType = SQLSERVRESP
             else:
                 pktType = SQLSERVREQ
-        elif db.dbtype == MYSQL:
+        elif db.dbType == MYSQL:
             if pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
                 #self.printLn("[*] is resp: pkt src IP and known DB IP:\t%s; %s"%(pkt[IP].src, db.ip))
                 pktType = MYSQLRESP
@@ -227,8 +258,10 @@ class Parse(threading.Thread):
         #self.printLn("current num of conns predelete:\t%s"%len(self.knownConns))
         #self.printLn("[*] FIN/ACK detected; deleting conn")
         if len(conn.traffic) > 0:
+            self.printLn("[*] Moving traffic to DB before deleting conn")
             for t in conn.traffic:
                 conn.db.traffic.append(t)
+            #self.printLn(conn.db.traffic.query+'\n'+conn.db.traffic.result)
         self.knownConns.remove(conn)
         #self.printLn("current num of conns postdelete:\t%s"%len(self.knownConns))
 
@@ -236,9 +269,16 @@ class Parse(threading.Thread):
         #self.printLn("\n--[*] Pkt found--\n[*] pkt sip:sport; dip:dport - %s:%s; %s:%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport))
         #self.printLn("[*] Payload length:\t%s"%len(pkt[TCP].payload))
         #self.printLn("[*] Current known conns:\t%s"%len(self.knownConns))
-        for c in self.knownConns:
+        #for c in self.knownConns:
             #self.printLn("\tcip:cport; sip:sport - %s:%s; %s:%s"%(c.cip,c.cport,c.db.ip,c.db.port))
         
+        #even with TCP filter set on scapy, will occassionally get packets
+        #with no TCP layer. breaks thread.
+        try:
+            pkt[TCP]
+        except:
+            return
+
         c = self.getConn(pkt)
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
             self.delConn(c)
@@ -270,7 +310,7 @@ class Parse(threading.Thread):
             dbType = SQLSERV
 
         if ip and port and dbType:
-            db = DataBase(ip=ip,port=port,dbtype=dbType)
+            db = DataBase(ip=ip,port=port,dbType=dbType)
             self.knownDBs.append(db)
             c = self.addConn(pkt,db)
             self.parse(pkt,c)
@@ -337,17 +377,21 @@ class Parse(threading.Thread):
         self.printLn("Payload len:\t%s"%len(data))
         data = data.encode('hex')
         pktlen = len(data)/2
-        lengths=[]
+        lengths = []
+        ret = ''
         while len(data)>0:
             length = int(self.flipEndian(data[:6]),16)
             lengths.append(length)
             self.printLn("SubPacket Raw:\t%s"%data[8:8+(length*2)])
             self.printLn("SubPacket ASCII:\t%s"%self.readable(data[8:8+(length*2)]))
+            ret += self.readable(data[8:8+(length*2)])
             data = data[8+(length*2):]
         #self.store(parseddata,MYSQLREQ,conn)    
-        #data = data.encode('hex')        
+        #data = data.encode('hex')
+        self.store(ret,MYSQLREQ,conn)      
 
     def parseMySqlResp(self,data,conn):
+        resp = ''
         self.printLn("\n--MySQL Resp--\n")
         self.printLn("Payload len:\t%s"%len(data))
         #self.store('[*] Raw:\t%s'%str(data).encode('hex'))
@@ -361,18 +405,31 @@ class Parse(threading.Thread):
             self.printLn("SubPacket ASCII:\t%s"%self.readable(encdata[8:8+(length*2)]))
             encdata = encdata[8+(length*2):]
 
+        ret = ''
         res = connections.MySQLResult(connections.Result(data))
         try:
             res.read()
             self.printLn('[*] Message:\t%s'%str(res.message))
             self.printLn('[*] Description:\t%s'%str(res.description))
             self.printLn('[*] Rows:')
-            if len(res.rows)>0:
+            if res.rows and len(res.rows)>0:
                 for r in res.rows:
                     self.printLn(self.formatTuple(r))
+            if res.message and len(res.message) > 0:
+                ret += '\tMessages:'
+                for m in res.message:
+                    ret += '\t\t%s\n'%m
+            if res.description and len(res.description) > 0:
+                ret += '\tDescription:\t%s\n'%str(res.description)
+            if res.rows and len(res.rows)>0:
+                ret += '\tResult:\n'
+                for r in res.rows:
+                    ret += "\t\t%s\n"%str(r)
         except:
             self.printLn('[!] Error:\t%s'%sys.exc_info()[1])
+            ret += '\tError:\t%s\n'%sys.exc_info()[1]
         self.printLn('[*] Raw:\t%s\n'%str(data).encode('hex'))
+        self.store(ret,MYSQLRESP,conn)
 
     def parseSqlServReq(self,pkt,conn):
     	data = str(pkt[TCP])[20:].encode('hex')
@@ -390,7 +447,7 @@ class Parse(threading.Thread):
 
     def store(self,data,pktType,conn):
         if conn.db.name == UNKNOWN: #schema unknown, track traffic in conn
-            if ISRESP(pktType) and conn.traffic[-1].result == None: #is result
+            if ISRESP(pktType) and len(conn.traffic) > 0 and conn.traffic[-1].result == None: #is result
                 conn.traffic[-1].result = data
             elif ISRESP(pktType): #is result, missed query
                 conn.traffic.append(Traffic(result=data))
@@ -450,7 +507,7 @@ class Pillage(threading.Thread):
 def writeResults(t):
     print('[*] Enter filepath to write to:')
     path = raw_input("> ")
-    t.writeln(path)  
+    t.dumpResults(path)  
 
 def printResults():
     print('[*] Results so far:')
@@ -473,9 +530,6 @@ def pillage():
 def parseInput(input,t):
     if input == 'w':
         writeResults(t)
-    elif input == 'p':
-        #TODO: need parsing thread to save all data to a globally accessible data structure. another queue? 
-        t.println()
     elif input == 'r':
         pillage()
     elif input == 'q':
@@ -499,7 +553,7 @@ def nonBlockingRawInput(t, prompt='> ', timeout=5):
     try:
         text = raw_input(prompt)
         signal.alarm(0)
-        return text
+        parseInput(text,t)
     except AlarmException:
         printMainMenu(t)
     signal.signal(signal.SIGALRM,signal.SIG_IGN)
@@ -515,8 +569,6 @@ def printMainMenu(t,wipe=True):
     print('[*] Current number of known connections:\t%s'%t.getNumConns())
     print('\n[*] Menu Items:')
     print('\tw - dump current results to file specified')
-    #TODO: menu printing wipes all printed data
-    #print('\tp - print current results to screen')
     print('\tr - run a query against a specified DB')
     print('\tq - quit')
 
@@ -540,12 +592,12 @@ def main():
             t2.die = True
             t3.die = True
             break
-        except:
-            t1.die = True
-            t2.die = True
-            t3.die = True
-            print sys.exc_info()[1]
-            break
+        #except:
+            #t1.die = True
+            #t2.die = True
+            #t3.die = True
+            #print sys.exc_info()[1]
+            #break
     
 if __name__ == "__main__":
     main()
