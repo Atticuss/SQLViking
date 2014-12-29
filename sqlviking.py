@@ -63,6 +63,12 @@ class DataBase():
         else:
             return 'Unknown'
 
+    def getName(self):
+        if self.name == UNKNOWN:
+            return "Unknown"
+        else:
+            return self.name
+
     def status(self):
         res = "---%s:%s---\n"%(self.ip,self.port)
         res += "Type:\t%s\n"% self.getType()
@@ -73,10 +79,10 @@ class DataBase():
             res = res[:-2]+"\n"
         else:
             res += "no users identified yet\n"
-        res += "Schema:\t%s"%self.name
+        res += "Schema:\t%s\n"%self.getName()
         res += "\nIdentified traffic:\n"
         for t in self.traffic:
-            res += 'Query:\t%s\n'%t.query
+            res += 'Query:\n\t%s\n'%t.query
             res += 'Response:\n%s\n'%t.result
         return res
 
@@ -121,16 +127,22 @@ class Parse(threading.Thread):
             pktType = self.isSqlServ(pkt)
         return pktType
 
-    def parse(self,pkt,conn):
+    def parse(self,pkts,conn):
+        payload = ''
+        for p in pkts:
+            payload += str(p[TCP].payload)
+        #self.printLn("\nRaw:\t%s"%payload.encode('hex'))
+        #self.printLn("ASCII:\t%s\n"%self.readable(payload).encode('hex'))
+
     	db = conn.db
         pktType = UNKNOWN
     	if db.dbType == SQLSERV:
-            if pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
+            if pkts[0][IP].src == db.ip and pkt[TCP].sport == db.port:
                 pktType = SQLSERVRESP
             else:
                 pktType = SQLSERVREQ
         elif db.dbType == MYSQL:
-            if pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
+            if pkts[0][IP].src == db.ip and pkts[0][TCP].sport == db.port:
                 #self.printLn("[*] is resp: pkt src IP and known DB IP:\t%s; %s"%(pkt[IP].src, db.ip))
                 pktType = MYSQLRESP
             else:
@@ -138,13 +150,13 @@ class Parse(threading.Thread):
                 #self.printLn("[*] is req: pkt src IP and known DB IP:\t%s; %s"%(pkt[IP].src, db.ip))
 
         if pktType == MYSQLREQ:
-            self.parseMySqlReq(str(pkt[TCP].payload),conn)
+            self.parseMySqlReq(payload,conn)
         elif pktType == MYSQLRESP:
-            self.parseMySqlResp(str(pkt[TCP].payload),conn)
+            self.parseMySqlResp(payload,conn)
         elif pktType == SQLSERVREQ:
-            self.parseSqlServReq(str(pkt[TCP].payload),conn)
+            self.parseSqlServReq(payload,conn)
         elif pktType == SQLSERVRESP:
-            self.parseSqlServResp(str(pkt[TCP].payload),conn)
+            self.parseSqlServResp(payload,conn)
         #else:
             #self.printLn("\n[*] Unidentified Packet")
             #self.printLn("[*] Raw:\t%s"%str(pkt[TCP].payload).encode('hex'))
@@ -170,7 +182,7 @@ class Parse(threading.Thread):
         #self.printLn("[*] Lengths & tlen:\t%s; %s"%(lengths,tlen))
         #self.printLn("[*] Payloads:\t%s"%payloads)
         #for p in payloads:
-        #    self.printLn("[*] ASCII:\t%s"%self.readable(p))
+        #    #self.printLn("[*] ASCII:\t%s"%self.readable(p))
 
         if tlen == pktlen and len(payloads) > 0:
             if self.isMySqlReq(payloads):
@@ -243,8 +255,6 @@ class Parse(threading.Thread):
                 return db
 
     def addConn(self,pkt,db):
-        #if db:
-        #self.printLn("[*] Creating conn:\n\tsip:sport; dip:dport; dbip:dbport - %s:%s; %s:%s; %s:%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,db.ip,db.port))
         if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port:
             c = Conn(pkt[IP].src,pkt[TCP].sport,db)
         elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
@@ -255,25 +265,17 @@ class Parse(threading.Thread):
         return c   	
 
     def delConn(self,conn):
-        #self.printLn("current num of conns predelete:\t%s"%len(self.knownConns))
-        #self.printLn("[*] FIN/ACK detected; deleting conn")
-        if len(conn.traffic) > 0:
-            self.printLn("[*] Moving traffic to DB before deleting conn")
-            for t in conn.traffic:
-                conn.db.traffic.append(t)
-            #self.printLn(conn.db.traffic.query+'\n'+conn.db.traffic.result)
+        #curently unused as all traffic is tracked in db object, not conn
+        #if len(conn.traffic) > 0:
+        #    #self.printLn("[*] Moving traffic to DB before deleting conn")
+        #    for t in conn.traffic:
+        #        conn.db.traffic.append(t)
         self.knownConns.remove(conn)
-        #self.printLn("current num of conns postdelete:\t%s"%len(self.knownConns))
 
     def handle(self,pkt):
-        #self.printLn("\n--[*] Pkt found--\n[*] pkt sip:sport; dip:dport - %s:%s; %s:%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport))
-        #self.printLn("[*] Payload length:\t%s"%len(pkt[TCP].payload))
-        #self.printLn("[*] Current known conns:\t%s"%len(self.knownConns))
-        #for c in self.knownConns:
-            #self.printLn("\tcip:cport; sip:sport - %s:%s; %s:%s"%(c.cip,c.cport,c.db.ip,c.db.port))
-        
         #even with TCP filter set on scapy, will occassionally get packets
-        #with no TCP layer. breaks thread.
+        #with no TCP layer. throws exception and breaks thread.
+        pkts = []
         try:
             pkt[TCP]
         except:
@@ -283,69 +285,50 @@ class Parse(threading.Thread):
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
             self.delConn(c)
             return
-        elif len(pkt[TCP].payload) == 0: #empty pkt, no reason to parse
-            return
-        elif c:
-            self.parse(pkt,c)
+        elif '00'*len(pkt[TCP].payload) == str(pkt[TCP].payload).encode('hex') or len(pkt[TCP].payload) == 0: #empty pkt, no reason to parse
             return
 
-        db = self.isKnownDB(pkt)
-        if db:
-            c = self.addConn(pkt,db)
-            self.parse(pkt,c)
-            return
+        if not c:
+            db = self.isKnownDB(pkt)
+            if db:
+                c = self.addConn(pkt,db)
 
-        pktType = self.fingerprint(pkt)
-        ip, port, dbType = None, None, None
-        if ISRESP(pktType):
-            ip = pkt[IP].src
-            port = pkt[TCP].sport
-        elif ISREQ(pktType):
-            ip = pkt[IP].dst
-            port = pkt[TCP].dport
+        if not c:
+            pktType = self.fingerprint(pkt)
+            #self.printLn("[*] Packet fingerprinted:\t%s"%pktType)
+            ip, port, dbType = None, None, None
+            if ISRESP(pktType):
+                ip = pkt[IP].src
+                port = pkt[TCP].sport
+            elif ISREQ(pktType):
+                ip = pkt[IP].dst
+                port = pkt[TCP].dport
 
-        if ISMYSQL(pktType):
-            dbType = MYSQL
-        elif ISSQLSERV(pktType):
-            dbType = SQLSERV
+            if ISMYSQL(pktType):
+                dbType = MYSQL
+            elif ISSQLSERV(pktType):
+                dbType = SQLSERV
 
-        if ip and port and dbType:
-            db = DataBase(ip=ip,port=port,dbType=dbType)
-            self.knownDBs.append(db)
-            c = self.addConn(pkt,db)
-            self.parse(pkt,c)
+            if ip and port and dbType:
+                db = DataBase(ip=ip,port=port,dbType=dbType)
+                self.knownDBs.append(db)
+                c = self.addConn(pkt,db)
         
-    #def parse(self,pkt):
-        #TODO: determining parser by port. need to account for DBs on non-standard ports.
-        #print '\nSource:\t%s\nTCP Val:\t%s\nAck:\t%s\nSeq:\t%s\n'%(pkt[IP].src,str(pkt[TCP]).encode('hex'),pkt[TCP].ack,pkt[TCP].seq)
-        #if pkt[TCP].sport == 1433 or pkt[TCP].sport == 3306:
-            #reassesmble pkts if fragged
-        #    key='%s:%s'%(pkt[IP].dst,pkt[TCP].dport)
-        #    if len(str(pkt[IP])) == self.mtu:
-        #        try:
-        #            self.frag[key]+=str(pkt[TCP])[20:]
-        #        except KeyError:
-        #            self.frag[key]=str(pkt[TCP])[20:]
-        #    else:
-        #        try:
-        #            if pkt[TCP].sport == 1433:
-        #                self.parseSqlServResp(self.frag[key]+str(pkt[TCP])[20:])
-        #            else:
-        #                self.parseMySqlResp(self.frag[key]+str(pkt[TCP])[20:])
-        #            del self.frag[key]
-        #        except KeyError:
-        #            if pkt[TCP].sport == 1433:
-        #                self.parseSqlServResp(str(pkt[TCP])[20:])
-        #            else:
-        #                self.parseMySqlResp(str(pkt[TCP])[20:])
-        #elif pkt[TCP].dport == 1433:
-            #Pillage POC
-            #if len(pkt[TCP]) == 26:
-            #    req = sqlserver.Request()
-            #    send(IP(dst="192.168.37.135",src=pkt[IP].src)/TCP(flags="PA",dport=pkt[TCP].dport,sport=pkt[TCP].sport,seq=pkt[TCP].seq,ack=pkt[TCP].ack)/req.buildRequest("select top 1 * from customerLogin"))
-        #    self.parseSqlServReq(str(pkt[TCP]).encode('hex')[40:])
-        #elif pkt[TCP].dport == 3306:
-        #    self.parseMySqlReq(str(pkt[TCP]).encode('hex')[40:])
+        if c:
+            if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set
+                #self.printLn("[*] Fragged packet found. Storing to parse later")
+                c.frag.append(pkt)
+            else:
+                if len(c.frag) > 0:
+                    #self.printLn("[*] All fragged packets transmitted. Rebuilding TCP payload")
+                    for p in c.frag:
+                        pkts.append(p)
+                    c.frag = []
+                pkts.append(pkt)
+                #self.printLn("[*] Parsing packet")
+                self.parse(pkts,c)
+        #else:
+        #    #self.printLn("[*] No conn object, not parsing packet")
 
     def validAscii(self,h):
         if int(h,16)>31 and int(h,16)<127:
@@ -373,8 +356,8 @@ class Parse(threading.Thread):
     #if database can be determined, create db if it doesn't exist or point to existing db
     #if user can be determined, update db.users
     def parseMySqlReq(self,data,conn):
-        self.printLn("\n--MySQL Req--\n")
-        self.printLn("Payload len:\t%s"%len(data))
+        #self.printLn("\n--MySQL Req--\n")
+        #self.printLn("Payload len:\t%s"%len(data))
         data = data.encode('hex')
         pktlen = len(data)/2
         lengths = []
@@ -382,8 +365,8 @@ class Parse(threading.Thread):
         while len(data)>0:
             length = int(self.flipEndian(data[:6]),16)
             lengths.append(length)
-            self.printLn("SubPacket Raw:\t%s"%data[8:8+(length*2)])
-            self.printLn("SubPacket ASCII:\t%s"%self.readable(data[8:8+(length*2)]))
+            #self.printLn("SubPacket Raw:\t%s"%data[8:8+(length*2)])
+            #self.printLn("SubPacket ASCII:\t%s"%self.readable(data[8:8+(length*2)]))
             ret += self.readable(data[8:8+(length*2)])
             data = data[8+(length*2):]
         #self.store(parseddata,MYSQLREQ,conn)    
@@ -392,8 +375,8 @@ class Parse(threading.Thread):
 
     def parseMySqlResp(self,data,conn):
         resp = ''
-        self.printLn("\n--MySQL Resp--\n")
-        self.printLn("Payload len:\t%s"%len(data))
+        #self.printLn("\n--MySQL Resp--\n")
+        #self.printLn("Payload len:\t%s"%len(data))
         #self.store('[*] Raw:\t%s'%str(data).encode('hex'))
         encdata = data.encode('hex')
         pktlen = len(encdata)/2
@@ -401,20 +384,20 @@ class Parse(threading.Thread):
         while len(encdata)>0:
             length = int(self.flipEndian(encdata[:6]),16)
             lengths.append(length)
-            self.printLn("SubPacket Raw:\t%s"%encdata[8:8+(length*2)])
-            self.printLn("SubPacket ASCII:\t%s"%self.readable(encdata[8:8+(length*2)]))
+            #self.printLn("SubPacket Raw:\t%s"%encdata[8:8+(length*2)])
+            #self.printLn("SubPacket ASCII:\t%s"%self.readable(encdata[8:8+(length*2)]))
             encdata = encdata[8+(length*2):]
 
         ret = ''
         res = connections.MySQLResult(connections.Result(data))
         try:
             res.read()
-            self.printLn('[*] Message:\t%s'%str(res.message))
-            self.printLn('[*] Description:\t%s'%str(res.description))
-            self.printLn('[*] Rows:')
-            if res.rows and len(res.rows)>0:
-                for r in res.rows:
-                    self.printLn(self.formatTuple(r))
+            #self.printLn('[*] Message:\t%s'%str(res.message))
+            #self.printLn('[*] Description:\t%s'%str(res.description))
+            #self.printLn('[*] Rows:')
+            #if res.rows and len(res.rows)>0:
+            #    for r in res.rows:
+                    #self.printLn(self.formatTuple(r))
             if res.message and len(res.message) > 0:
                 ret += '\tMessages:'
                 for m in res.message:
@@ -426,9 +409,9 @@ class Parse(threading.Thread):
                 for r in res.rows:
                     ret += "\t\t%s\n"%str(r)
         except:
-            self.printLn('[!] Error:\t%s'%sys.exc_info()[1])
+            #self.printLn('[!] Error:\t%s'%sys.exc_info()[1])
             ret += '\tError:\t%s\n'%sys.exc_info()[1]
-        self.printLn('[*] Raw:\t%s\n'%str(data).encode('hex'))
+        #self.printLn('[*] Raw:\t%s\n'%str(data).encode('hex'))
         self.store(ret,MYSQLRESP,conn)
 
     def parseSqlServReq(self,pkt,conn):
@@ -446,24 +429,25 @@ class Parse(threading.Thread):
             self.store("--SQLServ Resp--\n%s"%resp.results)
 
     def store(self,data,pktType,conn):
-        if conn.db.name == UNKNOWN: #schema unknown, track traffic in conn
-            if ISRESP(pktType) and len(conn.traffic) > 0 and conn.traffic[-1].result == None: #is result
-                conn.traffic[-1].result = data
-            elif ISRESP(pktType): #is result, missed query
-                conn.traffic.append(Traffic(result=data))
-            else: #is query
-                conn.traffic.append(Traffic(query=data))
-        else: #schema known, track traffic in conn.db
-            if len(conn.traffic) > 0:
-                for t in conn.traffic:
-                    conn.db.traffic.append(t)
-                conn.traffic = []
-            if ISRESP(pktType) == conn.db.ip and conn.db.traffic[-1].result == None: #is result
-                conn.db.traffic[-1].result = data
-            elif ISRESP(pktType) == conn.db.ip: #is result, missed query
-                conn.db.traffic.append(Traffic(result=data))
-            else: #is query
-                conn.db.traffic.append(Traffic(query=data))
+        #if conn.db.name == UNKNOWN: #schema unknown, track traffic in conn
+        #    if ISRESP(pktType) and len(conn.traffic) > 0 and conn.traffic[-1].result == None: #is result
+        #        conn.traffic[-1].result = data
+        #    elif ISRESP(pktType): #is result, missed query
+        #        conn.traffic.append(Traffic(result=data))
+        #    else: #is query
+        #        conn.traffic.append(Traffic(query=data))
+        #else: #schema known, track traffic in conn.db
+        #if len(conn.traffic) > 0:
+        #    for t in conn.traffic:
+        #        conn.db.traffic.append(t)
+        #    conn.traffic = []
+        
+        if ISRESP(pktType) and len(conn.db.traffic) > 0 and conn.db.traffic[-1].result == None: #is result
+            conn.db.traffic[-1].result = data
+        elif ISRESP(pktType): #is result, missed query
+            conn.db.traffic.append(Traffic(result=data))
+        else: #is query
+            conn.db.traffic.append(Traffic(query=data))
 
     #no longer functions; Parse.res attr deprecated
     def writeln(self,path):
