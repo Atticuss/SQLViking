@@ -455,15 +455,10 @@ class Parse(threading.Thread):
 
 class Scout(threading.Thread):
     def __init__(self):
-<<<<<<< HEAD
-            threading.Thread.__init__(self)
-            self.die = False
 
-=======
         threading.Thread.__init__(self)
         self.die = False
-        
->>>>>>> master
+
     def run(self):
         self.scout()
 
@@ -587,6 +582,6 @@ def main():
             #t3.die = True
             #print sys.exc_info()[1]
             #break
-            
+
 if __name__ == "__main__":
     main()
