@@ -553,7 +553,7 @@ def printMainMenu(t,wipe=True):
     print('[*] Current number of known connections:\t%s'%t.getNumConns())
     print('\n[*] Menu Items:')
     print('\tw - dump current results to file specified')
-    print('\tr - run a query against a specified DB')
+    print('\tr - run a query against a specified DB (not implemented yet)')
     print('\tq - quit')
 
 def main():
