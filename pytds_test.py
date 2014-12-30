@@ -26,7 +26,7 @@ if len(resp.results)>0:
 #else:
 #    print resp.messages[0]['message']
 
-conn = pytds.connect('192.168.37.135','testdb','sa','swarmtoor')
+conn = pytds.connect('192.168.37.135','testdb','sa','TRYAGAINJACK')
 cur = conn.cursor()
 cur.execute("select top 1 * from customerLogin")
 #tracer.runfunc(cur.execute,"select top 1 * from customerlogin",)
