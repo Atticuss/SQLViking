@@ -90,11 +90,9 @@ class AlarmException(Exception):
     pass
 
 class Parse(threading.Thread):
-    #TODO: need to be able to set MTU
-    def __init__(self,mtu=1500):
+    def __init__(self):
         threading.Thread.__init__(self)
         self.die = False
-        self.mtu = mtu
         self.frag = {}
         self.res = ''
         self.knownConns = []
