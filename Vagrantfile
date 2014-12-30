@@ -31,7 +31,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
     app.vm.communicator = "winrm"
     
-    app.vm.network "private_network", ip: "192.168.123.123"
+    app.vm.network "private_network", ip: "s"
     app.vm.network :forwarded_port, guest: 85, host: 85
     app.vm.network :forwarded_port, guest: 3389, host: 1234
     app.vm.network :forwarded_port, guest: 5985, host: 5985, id: "winrm", auto_correct: true
@@ -58,7 +58,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
   config.vm.define :sqlviking do |viking|
     viking.vm.box = "phusion/ubuntu-14.04-amd64"
-    viking.vm.guest = :linux
 
     viking.vm.provider "virtualbox" do |v|
       v.gui = true
