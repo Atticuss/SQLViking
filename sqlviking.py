@@ -129,23 +129,21 @@ class Parse(threading.Thread):
         payload = ''
         for p in pkts:
             payload += str(p[TCP].payload)
-        #self.printLn("\nRaw:\t%s"%payload.encode('hex'))
-        #self.printLn("ASCII:\t%s\n"%self.readable(payload).encode('hex'))
 
     	db = conn.db
-        pktType = UNKNOWN
-    	if db.dbType == SQLSERV:
+        if db.dbType == UNKNOWN:
+            pktType = self.fingerprint(payload)
+
+    	if ISSQLSERV(db.dbType):
             if pkts[0][IP].src == db.ip and pkt[TCP].sport == db.port:
                 pktType = SQLSERVRESP
             else:
                 pktType = SQLSERVREQ
-        elif db.dbType == MYSQL:
+        elif ISMYSQL(db.dbType):
             if pkts[0][IP].src == db.ip and pkts[0][TCP].sport == db.port:
-                #self.printLn("[*] is resp: pkt src IP and known DB IP:\t%s; %s"%(pkt[IP].src, db.ip))
                 pktType = MYSQLRESP
             else:
                 pktType = MYSQLREQ
-                #self.printLn("[*] is req: pkt src IP and known DB IP:\t%s; %s"%(pkt[IP].src, db.ip))
 
         if pktType == MYSQLREQ:
             self.parseMySqlReq(payload,conn)
@@ -155,13 +153,9 @@ class Parse(threading.Thread):
             self.parseSqlServReq(payload,conn)
         elif pktType == SQLSERVRESP:
             self.parseSqlServResp(payload,conn)
-        #else:
-            #self.printLn("\n[*] Unidentified Packet")
-            #self.printLn("[*] Raw:\t%s"%str(pkt[TCP].payload).encode('hex'))
-            #self.printLn("[*] ASCII:\t%s"%self.readable(str(pkt[TCP].payload).encode('hex')))
 
-    def isMySql(self,pkt):
-        encpkt = str(pkt[TCP].payload).encode('hex')
+    def isMySql(self,payload):
+        encpkt = str(payload).encode('hex')
         pktlen = len(encpkt)/2
         lengths = []
         payloads = []
@@ -214,13 +208,13 @@ class Parse(threading.Thread):
         elif len(payloads[0]) == 2 and int(payloads[0], 16) == self.getMysqlCols(payloads): #Query RESP
             return True
 
-    def isSqlServ(self,pkt):
+    def isSqlServ(self,payload):
         return UNKNOWN
 
-    def isSqlServReq(self,pkt):
+    def isSqlServReq(self,payload):
         return False
 
-    def isSqlServResp(self,pkt):
+    def isSqlServResp(self,payload):
         return False
 
     def flipEndian(self,data):
@@ -252,13 +246,15 @@ class Parse(threading.Thread):
             if pkt[IP].src == db.ip and pkt[TCP].sport == db.port and db.name == UNKNOWN:
                 return db
 
-    def addConn(self,pkt,db):
-        if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port:
-            c = Conn(pkt[IP].src,pkt[TCP].sport,db)
-        elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
-            c = Conn(pkt[IP].dst,pkt[TCP].dport,db)
+    def addConn(self,pkt,db=None):
+
+        if db:
+            if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port:
+                c = Conn(pkt[IP].src,pkt[TCP].sport,db)
+            elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
+                c = Conn(pkt[IP].dst,pkt[TCP].dport,db)
         else:
-            self.printLn("[!] Attempted to add bad conn")
+            c = Conn(pkt[IP].src,pkt[TCP].sport)
         self.knownConns.append(c) 
         return c   	
 
@@ -279,22 +275,26 @@ class Parse(threading.Thread):
         except:
             return
 
+        #self.printLn('[*] ASCII:\t%s'%self.readable(str(pkt[TCP].payload).encode('hex')))
+
         c = self.getConn(pkt)
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
             self.delConn(c)
             return
-        elif '00'*len(pkt[TCP].payload) == str(pkt[TCP].payload).encode('hex') or len(pkt[TCP].payload) == 0: #empty pkt, no reason to parse
+        elif '00'*len(pkt[TCP].payload) == str(pkt[TCP].payload).encode('hex') or len(pkt[TCP].payload) == 0 or pkt[TCP].flags == 16: #empty/ACK pkt, no reason to parse
             return
 
-        if not c:
+        if not c: #check if conn is being made to a known DB
             db = self.isKnownDB(pkt)
             if db:
                 c = self.addConn(pkt,db)
 
+        ip, port, dbType = None, None, None
+        if not c and pkt[TCP].flags == 3: #SYN pkt; src is client, dst is serv
+            c = self.addConn(pkt)
+
         if not c:
-            pktType = self.fingerprint(pkt)
-            #self.printLn("[*] Packet fingerprinted:\t%s"%pktType)
-            ip, port, dbType = None, None, None
+            pktType = self.fingerprint(str(pkt[TCP].payload))
             if ISRESP(pktType):
                 ip = pkt[IP].src
                 port = pkt[TCP].sport
@@ -313,20 +313,15 @@ class Parse(threading.Thread):
                 c = self.addConn(pkt,db)
         
         if c:
-            if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set
-                #self.printLn("[*] Fragged packet found. Storing to parse later")
+            if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set, is a fragged pkt
                 c.frag.append(pkt)
             else:
-                if len(c.frag) > 0:
-                    #self.printLn("[*] All fragged packets transmitted. Rebuilding TCP payload")
+                if len(c.frag) > 0: #rebuild pkt if fragged before parsing
                     for p in c.frag:
                         pkts.append(p)
                     c.frag = []
                 pkts.append(pkt)
-                #self.printLn("[*] Parsing packet")
                 self.parse(pkts,c)
-        #else:
-        #    #self.printLn("[*] No conn object, not parsing packet")
 
     def validAscii(self,h):
         if int(h,16)>31 and int(h,16)<127:
@@ -356,6 +351,7 @@ class Parse(threading.Thread):
     def parseMySqlReq(self,data,conn):
         #self.printLn("\n--MySQL Req--\n")
         #self.printLn("Payload len:\t%s"%len(data))
+        #self.printLn('[*] ASCII:\t%s'%self.readable(str(data).encode('hex')))
         data = data.encode('hex')
         pktlen = len(data)/2
         lengths = []
@@ -375,7 +371,7 @@ class Parse(threading.Thread):
         resp = ''
         #self.printLn("\n--MySQL Resp--\n")
         #self.printLn("Payload len:\t%s"%len(data))
-        #self.store('[*] Raw:\t%s'%str(data).encode('hex'))
+        #self.printLn('[*] ASCII:\t%s'%self.readable(str(data).encode('hex')))
         encdata = data.encode('hex')
         pktlen = len(encdata)/2
         lengths=[]
@@ -439,13 +435,15 @@ class Parse(threading.Thread):
         #    for t in conn.traffic:
         #        conn.db.traffic.append(t)
         #    conn.traffic = []
-        
         if ISRESP(pktType) and len(conn.db.traffic) > 0 and conn.db.traffic[-1].result == None: #is result
             conn.db.traffic[-1].result = data
+            #self.printLn("[1] Storing pkt")
         elif ISRESP(pktType): #is result, missed query
             conn.db.traffic.append(Traffic(result=data))
+            #self.printLn("[2] Storing pkt")
         else: #is query
             conn.db.traffic.append(Traffic(query=data))
+            #self.printLn("[3] Storing pkt")
 
     #no longer functions; Parse.res attr deprecated
     def writeln(self,path):
@@ -462,16 +460,41 @@ class Scout(threading.Thread):
         self.scout()
 
     def scout(self):
+        global pkts
         while not self.die:
             try:
-                sniff(prn=self.pushToQueue,filter="tcp",store=0,timeout=5)
+                sniff(prn=self.queuePkt,filter="tcp",store=0,timeout=5)
             except:
                 print sys.exc_info()[1]
                 self.die = True
 
-    def pushToQueue(self,pkt):
+    def queuePkt(self,pkt):
         global pkts
         pkts.put(pkt)
+        self.printLn("[*] pkt found: src;dst - %s;%s"%(pkt[IP].src,pkt[IP].dst))
+        self.printLn("[*] ASCII:\t%s"%self.readable(str(pkt[TCP].payload).encode('hex')))
+
+    def validAscii(self,h):
+        if int(h,16)>31 and int(h,16)<127:
+            return True
+        return False
+
+    def readable(self,data):
+        a=""
+        for i in range(0,len(data),2):
+            if self.validAscii(data[i:i+2]):
+                a+=data[i:i+2].decode('hex')
+        return a
+
+    def formatTuple(self,t):
+        res=''
+        for i in t:
+            res+="%s, "%i
+        return res[:-2]
+
+    def printLn(self,msg):
+        with open('out.txt','a') as f:
+            f.write(msg+'\n')
     
 class Pillage(threading.Thread):
     def __init__(self):
