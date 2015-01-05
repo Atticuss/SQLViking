@@ -13,3 +13,6 @@ ISREQ     = lambda x: x % REQUEST == 0
 ISRESP    = lambda x: x % RESPONSE == 0
 ISMYSQL   = lambda x: x % MYSQL == 0
 ISSQLSERV = lambda x: x % SQLSERV == 0
+
+HANDSHAKE   = 1
+ESTABLISHED = 2

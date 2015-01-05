@@ -21,14 +21,17 @@ class Traffic():
 		self.timestamp = datetime.datetime.now()
 
 class Conn():
-    def __init__(self,cip,cport,nextseq,db=UNKNOWN):
+    def __init__(self,cip,cport,sip,sport,nextcseq=-1,nextsseq=-1,db=UNKNOWN):
         self.cip     = cip
         self.cport   = cport
+        self.sip     = sip
+        self.sport   = sport
         self.db      = db
         self.traffic = []
         self.frag    = []
         #unused; implement later to increase dropped/out of order/redundant packet fault tolerance and for TCP injection support
-        self.nextseq = nextseq
+        self.nextcseq = nextcseq
+        self.nextsseq = nextsseq
 
 class DataBase():
     def __init__(self,ip,port,dbType,name=UNKNOWN):
@@ -114,7 +117,8 @@ class Parse(threading.Thread):
         for p in pkts:
             payload += str(p[TCP].payload)
 
-    	db = conn.db
+    	#this if statement should never be true
+        db = conn.db
         if db.dbType == UNKNOWN:
             pktType = self.fingerprint(payload)
 
@@ -153,11 +157,11 @@ class Parse(threading.Thread):
         #self.printLn("[*] Comparing pkt with known conns:")
         #self.printLn("\tpkt.srcip;pkt.sport;pkt.dstip;pkt.dport: %s;%s;%s;%s"%(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport))
         #self.printLn("\tcon.srcip;con.sport;con.dstip;con.dport: %s;%s;%s;%s"%(c.cip,c.cport,c.db.ip,c.db.port))
-        if c.cip == pkt[IP].dst and c.cport == pkt[TCP].dport and c.db.ip == pkt[IP].src and c.db.port == pkt[TCP].sport:
+        if c.cip == pkt[IP].dst and c.cport == pkt[TCP].dport and c.sip == pkt[IP].src and c.sport == pkt[TCP].sport:
             #self.printLn("\tIs a reponse")
             return RESPONSE
-        elif c.cip == pkt[IP].src and c.cport == pkt[TCP].sport and c.db.ip == pkt[IP].dst and c.db.port == pkt[TCP].dport:
-            #self.printLn("\tIs a requet")
+        elif c.cip == pkt[IP].src and c.cport == pkt[TCP].sport and c.sip == pkt[IP].dst and c.sport == pkt[TCP].dport:
+            #self.printLn("\tIs a request")
             return REQUEST
 
     def getConn(self,pkt):
@@ -175,12 +179,16 @@ class Parse(threading.Thread):
     def addConn(self,pkt,db=None):
         if db:
             if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port: #isReq
-                c = Conn(pkt[IP].src,pkt[TCP].sport,len(pkt[TCP].payload)+pkt[TCP].seq,db)
+                c = Conn(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,nextcseq=len(pkt[TCP].payload)+pkt[TCP].seq,db=db)
+                self.printLn("[1] Creating conn: cport;sport - %s;%s"%(pkt[TCP].sport,pkt[TCP].dport))
             elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port: #isResp
-                c = Conn(pkt[IP].dst,pkt[TCP].dport,len(pkt[TCP].payload)+pkt[TCP].seq,db)
+                c = Conn(pkt[IP].dst,pkt[TCP].dport,pkt[IP].src,pkt[TCP].sport,nextsseq=len(pkt[TCP].payload)+pkt[TCP].seq,db=db)
+                self.printLn("[2] Creating conn: cport;sport - %s;%s"%(pkt[TCP].dport,pkt[TCP].sport))
         else:
-            c = Conn(pkt[IP].src,pkt[TCP].sport,len(pkt[TCP].payload)+pkt[TCP].seq)
+            c = Conn(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,nextcseq=pkt[TCP].seq+1)
+            self.printLn("[3] Creating conn: cport;sport - %s;%s"%(pkt[TCP].sport,pkt[TCP].dport))
 
+        #self.printLn("[*] Creating conn: seq;nextseq;len - %s;%s:%s"%(pkt[TCP].seq,len(pkt[TCP].payload)+pkt[TCP].seq,len(pkt[TCP].payload)))
         self.knownConns.append(c) 
         return c   	
 
@@ -202,11 +210,20 @@ class Parse(threading.Thread):
             return
 
         c = self.getConn(pkt)
+        if not c:
+            self.printLn("[*] Packet not part of known conn")
+
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
             self.delConn(c)
+            return    
+        elif pkt[TCP].flags == 2 and not c: #SYN pkt
+            self.printLn("[*] SYN pkt detected: seq;ack - %s;%s"%(pkt[TCP].seq,pkt[TCP].ack))
+            c = self.addConn(pkt)
+            c.nextcseq = pkt[TCP].seq+1
             return
-        #empty pkt, no reason to parse. scapy sometimes returns empty pkts with [tcp].payload set to '\x00'*6    
-        elif len(pkt[TCP].payload) == 0 or (len(pkt[TCP].payload) == 6 and str(pkt[TCP].payload).encode('hex') == '0'*12): 
+        
+        #empty pkt, no reason to parse. scapy sometimes returns empty pkts with [tcp].payload of several '0' values
+        if len(pkt[TCP].payload) == 0 or (len(pkt[TCP].payload) <= 16 and str(pkt[TCP].payload).encode('hex') == '00'*len(pkt[TCP].payload)): 
             return
 
         if not c: #check if conn is being made to a known DB
@@ -215,10 +232,11 @@ class Parse(threading.Thread):
                 c = self.addConn(pkt,db)
 
         ip, port, dbType = None, None, None
-        if not c and pkt[TCP].flags == 3: #SYN pkt; src is client, dst is serv
-            c = self.addConn(pkt)
+        #if not c and pkt[TCP].flags == 2: #SYN pkt; src is client, dst is serv
+        #    self.printLn("[*] SYN pkt detected")
+        #    c = self.addConn(pkt)
 
-        if not c:
+        if not c or c.db == UNKNOWN:
             pktType = self.fingerprint(str(pkt[TCP].payload))
             if ISRESP(pktType):
                 ip = pkt[IP].src
@@ -235,27 +253,38 @@ class Parse(threading.Thread):
             if ip and port and dbType:
                 db = DataBase(ip=ip,port=port,dbType=dbType)
                 self.knownDBs.append(db)
-                c = self.addConn(pkt,db)
+                if not c:
+                    c = self.addConn(pkt,db)
+                else:
+                    c.db = db
         
         if c:
-            if pkt[TCP].seq != c.nextseq: #probably pkt retransmission
-                self.printLn("[*] pkt retransmission detected: seq;nextseq - %s;%s"%(pkt[TCP].seq,c.nextseq))
+            if pkt[IP].src == c.cip and pkt[TCP].sport == c.cport and c.nextcseq != -1 and c.nextcseq != pkt[TCP].seq: #is a bad req
+                self.printLn("[*] req pkt retransmission detected: seq;nextseq;len - %s;%s;%s"%(pkt[TCP].seq,c.nextcseq,len(pkt[TCP].payload)))
+                return
+            elif pkt[IP].dst == c.cip and pkt[TCP].dport == c.cport and c.nextsseq != -1 and c.nextsseq != pkt[TCP].seq: #is a bad resp
+                self.printLn("[*] resp pkt retransmission detected: seq;nextseq;len - %s;%s;%s"%(pkt[TCP].seq,c.nextsseq,len(pkt[TCP].payload)))
                 return
 
-            self.printLn("[*] valid pkt: seq;nextseq - %s;%s"%(pkt[TCP].seq,c.nextseq))
+            self.printLn("[*] valid pkt: seq;len;flags - %s;%s;%s"%(pkt[TCP].seq,len(pkt[TCP].payload),pkt[TCP].flags))
 
-            if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set, is a fragged pkt
+            if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set, is a fragged pkt. this breaks on boxes hosting both client and server. 
                 self.printLn("[*] Fragged pkt detected")
-                c.nextseq = len(pkt[TCP].payload)+c.nextseq
                 c.frag.append(pkt)
             else:
-                c.nextseq = pkt[TCP].ack
+                #c.nextseq = pkt[TCP].ack
                 if len(c.frag) > 0:
                     for p in c.frag:
                         pkts.append(p)
                     c.frag = []
                 pkts.append(pkt)
-                self.parse(pkts,c)
+                if c.db != UNKNOWN:
+                    self.parse(pkts,c)
+
+            if pkt[IP].src == c.cip and pkt[TCP].sport == c.cport:
+                c.nextcseq = len(pkt[TCP].payload)+pkt[TCP].seq
+            else:
+                c.nextsseq = len(pkt[TCP].payload)+pkt[TCP].seq
 
     def validAscii(self,h):
         if int(h,16)>31 and int(h,16)<127:
@@ -339,6 +368,7 @@ class Scout(threading.Thread):
         global pkts
         while not self.die:
             try:
+                #sniff(prn=lambda x: pkts.put(x),filter="tcp",store=0,timeout=5)
                 sniff(prn=self.queuePkt,filter="tcp",store=0,timeout=5)
             except:
                 print sys.exc_info()[1]
@@ -346,9 +376,10 @@ class Scout(threading.Thread):
 
     def queuePkt(self,pkt):
         global pkts
+        if pkt[TCP].payload:
+            self.printLn("[*] pkt found: src;dst - %s;%s"%(pkt[IP].src,pkt[IP].dst))
+            self.printLn("[*] ASCII:\t%s"%self.readable(str(pkt[TCP].payload).encode('hex')))
         pkts.put(pkt)
-        #self.printLn("[*] pkt found: src;dst - %s;%s"%(pkt[IP].src,pkt[IP].dst))
-        #self.printLn("[*] ASCII:\t%s"%self.readable(str(pkt[TCP].payload).encode('hex')))
 
     def validAscii(self,h):
         if int(h,16)>31 and int(h,16)<127:
@@ -369,7 +400,7 @@ class Scout(threading.Thread):
         return res[:-2]
 
     def printLn(self,msg):
-        with open('out.txt','a') as f:
+        with open('out2.txt','a') as f:
             f.write(msg+'\n')
     
 class Pillage(threading.Thread):
