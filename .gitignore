@@ -1,4 +1,4 @@
-pymysql/*.pyc
-pymysql/constants/*.pyc
+databases/pymysql/*.pyc
+databases/pymysql/constants/*.pyc
 pytds/*.pyc
 *.txt
