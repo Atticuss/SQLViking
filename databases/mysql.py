@@ -5,7 +5,7 @@ from constantvalues import *
 path.append("databases/pymysql/")
 import connections
 
-class MysqlDB(BaseDB):
+class MySqlDB(BaseDB):
     def __init__(self):
         pass
 
@@ -25,11 +25,6 @@ class MysqlDB(BaseDB):
         for l in lengths:
             tlen+=l
         tlen+= len(lengths)*4
-
-        #self.printLn("[*] Lengths & tlen:\t%s; %s"%(lengths,tlen))
-        #self.printLn("[*] Payloads:\t%s"%payloads)
-        #for p in payloads:
-        #    #self.printLn("[*] ASCII:\t%s"%self.readable(p))
 
         if tlen == pktlen and len(payloads) > 0:
             if self.isReq(payloads):
@@ -55,10 +50,10 @@ class MysqlDB(BaseDB):
         elif len(payloads[0]) == 2 and int(payloads[0], 16) == self.getMysqlCols(payloads): #Query RESP
             return True
 
+    #if database can be determined, create db if it doesn't exist or point to existing db
+    #if user can be determined, update db.users
+
     def parseReq(self,data,conn):
-        #self.printLn("\n--MySQL Req--\n")
-        #self.printLn("Payload len:\t%s"%len(data))
-        #self.printLn('[*] ASCII:\t%s'%self.readable(str(data).encode('hex')))
         data = data.encode('hex')
         pktlen = len(data)/2
         lengths = []
@@ -66,40 +61,24 @@ class MysqlDB(BaseDB):
         while len(data)>0:
             length = int(self.flipEndian(data[:6]),16)
             lengths.append(length)
-            #self.printLn("SubPacket Raw:\t%s"%data[8:8+(length*2)])
-            #self.printLn("SubPacket ASCII:\t%s"%self.readable(data[8:8+(length*2)]))
             ret += self.readable(data[8:8+(length*2)])
             data = data[8+(length*2):]
-        #self.store(parseddata,MYSQLREQ,conn)    
-        #data = data.encode('hex')
-        #self.store(ret,MYSQLREQ,conn)  
         return ret    
 
     def parseResp(self,data,conn):
         resp = ''
-        #self.printLn("\n--MySQL Resp--\n")
-        #self.printLn("Payload len:\t%s"%len(data))
-        #self.printLn('[*] ASCII:\t%s'%self.readable(str(data).encode('hex')))
         encdata = data.encode('hex')
         pktlen = len(encdata)/2
         lengths=[]
         while len(encdata)>0:
             length = int(self.flipEndian(encdata[:6]),16)
             lengths.append(length)
-            #self.printLn("SubPacket Raw:\t%s"%encdata[8:8+(length*2)])
-            #self.printLn("SubPacket ASCII:\t%s"%self.readable(encdata[8:8+(length*2)]))
             encdata = encdata[8+(length*2):]
 
         ret = ''
         res = connections.MySQLResult(connections.Result(data))
         try:
             res.read()
-            #self.printLn('[*] Message:\t%s'%str(res.message))
-            #self.printLn('[*] Description:\t%s'%str(res.description))
-            #self.printLn('[*] Rows:')
-            #if res.rows and len(res.rows)>0:
-            #    for r in res.rows:
-                    #self.printLn(self.formatTuple(r))
             if res.message and len(res.message) > 0:
                 ret += '\tMessages:'
                 for m in res.message:
@@ -111,10 +90,7 @@ class MysqlDB(BaseDB):
                 for r in res.rows:
                     ret += "\t\t%s\n"%str(r)
         except:
-            #self.printLn('[!] Error:\t%s'%sys.exc_info()[1])
             ret += '\tError:\t%s\n'%sys.exc_info()[1]
-        #self.printLn('[*] Raw:\t%s\n'%str(data).encode('hex'))
-        #self.store(ret,MYSQLRESP,conn)
         return ret
 
     def getMysqlCols(self,payloads):
