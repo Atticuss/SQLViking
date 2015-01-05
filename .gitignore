@@ -1,5 +1,5 @@
 databases/*.pyc
 databases/pymysql/*.pyc
 databases/pymysql/constants/*.pyc
-pytds/*.pyc
+databases/pytds/*.pyc
 *.txt
