@@ -1,4 +1,4 @@
-import sys,threading,time,logging,os,datetime,signal
+import sys,threading,time,logging,os,datetime,signal,binascii
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 from scapy.all import *
 from Queue import Queue
@@ -34,17 +34,14 @@ class Traffic():
 		self.timestamp = datetime.datetime.now()
 
 class Conn():
-    def __init__(self,cip,cport,db=UNKNOWN):
+    def __init__(self,cip,cport,nextseq,db=UNKNOWN):
         self.cip     = cip
         self.cport   = cport
         self.db      = db
         self.traffic = []
         self.frag    = []
-        #unused; implement later to increase dropped/out of order packet fault tolerance
-        self.seq     = -1
-        self.ack     = -1
-        self.nextseq = -1
-        self.neqack  = -1
+        #unused; implement later to increase dropped/out of order/redundant packet fault tolerance and for TCP injection support
+        self.nextseq = nextseq
 
 class DataBase():
     def __init__(self,ip,port,dbType,name=UNKNOWN):
@@ -178,15 +175,15 @@ class Parse(threading.Thread):
 
         if tlen == pktlen and len(payloads) > 0:
             if self.isMySqlReq(payloads):
-                return MYSQLREQ
+                pktType = MYSQLREQ
             elif self.isMySqlResp(payloads):
-                return MYSQLRESP
-            else:
-                #self.printLn("[!] MySQL packet but not resp or req")
-                return UNKNOWN
-        else:
-            #self.printLn("[!] Not a MySQL packet")
-            return UNKNOWN
+                pktType = MYSQLRESP
+            else: #possibly MySQL, cannot determine right now
+                pktType = MYSQL
+        else: #not a MySQL pkt
+            pktType = UNKNOWN
+
+        return pktType
 
     def isMySqlReq(self,payloads):
         if payloads[0] == '0e': #COM_PING
@@ -247,14 +244,14 @@ class Parse(threading.Thread):
                 return db
 
     def addConn(self,pkt,db=None):
-
         if db:
-            if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port:
-                c = Conn(pkt[IP].src,pkt[TCP].sport,db)
-            elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port:
-                c = Conn(pkt[IP].dst,pkt[TCP].dport,db)
+            if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port: #isReq
+                c = Conn(pkt[IP].src,pkt[TCP].sport,len(pkt[TCP].payload)+pkt[TCP].seq,db)
+            elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port: #isResp
+                c = Conn(pkt[IP].dst,pkt[TCP].dport,len(pkt[TCP].payload)+pkt[TCP].seq,db)
         else:
-            c = Conn(pkt[IP].src,pkt[TCP].sport)
+            c = Conn(pkt[IP].src,pkt[TCP].sport,len(pkt[TCP].payload)+pkt[TCP].seq)
+
         self.knownConns.append(c) 
         return c   	
 
@@ -275,13 +272,12 @@ class Parse(threading.Thread):
         except:
             return
 
-        #self.printLn('[*] ASCII:\t%s'%self.readable(str(pkt[TCP].payload).encode('hex')))
-
         c = self.getConn(pkt)
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
             self.delConn(c)
             return
-        elif '00'*len(pkt[TCP].payload) == str(pkt[TCP].payload).encode('hex') or len(pkt[TCP].payload) == 0 or pkt[TCP].flags == 16: #empty/ACK pkt, no reason to parse
+        #empty pkt, no reason to parse. scapy sometimes returns empty pkts with [tcp].payload set to '\x00'*6    
+        elif len(pkt[TCP].payload) == 0 or (len(pkt[TCP].payload) == 6 and str(pkt[TCP].payload).encode('hex') == '0'*12): 
             return
 
         if not c: #check if conn is being made to a known DB
@@ -313,10 +309,15 @@ class Parse(threading.Thread):
                 c = self.addConn(pkt,db)
         
         if c:
+            if pkt[TCP].seq != c.nextseq: #probably pkt retransmission
+                return
+
             if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set, is a fragged pkt
+                c.nextseq = len(pkt[TCP].payload)+c.nextseq
                 c.frag.append(pkt)
             else:
-                if len(c.frag) > 0: #rebuild pkt if fragged before parsing
+                c.nextseq = pkt[TCP].ack
+                if len(c.frag) > 0:
                     for p in c.frag:
                         pkts.append(p)
                     c.frag = []
@@ -471,8 +472,8 @@ class Scout(threading.Thread):
     def queuePkt(self,pkt):
         global pkts
         pkts.put(pkt)
-        self.printLn("[*] pkt found: src;dst - %s;%s"%(pkt[IP].src,pkt[IP].dst))
-        self.printLn("[*] ASCII:\t%s"%self.readable(str(pkt[TCP].payload).encode('hex')))
+        #self.printLn("[*] pkt found: src;dst - %s;%s"%(pkt[IP].src,pkt[IP].dst))
+        #self.printLn("[*] ASCII:\t%s"%self.readable(str(pkt[TCP].payload).encode('hex')))
 
     def validAscii(self,h):
         if int(h,16)>31 and int(h,16)<127:
