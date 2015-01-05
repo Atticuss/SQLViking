@@ -3,29 +3,16 @@ logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 from scapy.all import *
 from Queue import Queue
 from sys import path
-path.append("pymysql/")
-import connections
 path.append("pytds/")
 import sqlserver
+path.append("databases/")
+from constantvalues import *
+import mysql
+
+mysql = mysql.MysqlDB()
 
 pkts=Queue()
 queries=Queue()
-
-#when adding additional DBs, assign their value to the next unused prime number
-UNKNOWN     = 1
-REQUEST     = 2
-RESPONSE    = 3
-MYSQL       = 5
-SQLSERV     = 7
-MYSQLREQ    = MYSQL * REQUEST
-MYSQLRESP   = MYSQL * RESPONSE
-SQLSERVREQ  = SQLSERV * REQUEST
-SQLSERVRESP = SQLSERV * RESPONSE
-
-ISREQ     = lambda x: x % REQUEST == 0
-ISRESP    = lambda x: x % RESPONSE == 0
-ISMYSQL   = lambda x: x % MYSQL == 0
-ISSQLSERV = lambda x: x % SQLSERV == 0
 
 class Traffic():
 	def __init__(self,query=None,result=None):
@@ -117,7 +104,7 @@ class Parse(threading.Thread):
         return len(self.knownDBs)
 
     def fingerprint(self,pkt):
-        pktType = self.isMySql(pkt)
+        pktType = mysql.isDB(pkt)
         if pktType == UNKNOWN:
             pktType = self.isSqlServ(pkt)
         return pktType
@@ -143,67 +130,15 @@ class Parse(threading.Thread):
                 pktType = MYSQLREQ
 
         if pktType == MYSQLREQ:
-            self.parseMySqlReq(payload,conn)
+            self.printLn('[*] Mysql Req:\n%s'%self.readable(payload.encode('hex')))
+            self.store(mysql.parseReq(payload,conn),MYSQLREQ,conn)
         elif pktType == MYSQLRESP:
-            self.parseMySqlResp(payload,conn)
+            self.printLn('[*] Mysql Resp:\n%s'%self.readable(payload.encode('hex')))
+            self.store(mysql.parseResp(payload,conn),MYSQLRESP,conn)
         elif pktType == SQLSERVREQ:
             self.parseSqlServReq(payload,conn)
         elif pktType == SQLSERVRESP:
             self.parseSqlServResp(payload,conn)
-
-    def isMySql(self,payload):
-        encpkt = str(payload).encode('hex')
-        pktlen = len(encpkt)/2
-        lengths = []
-        payloads = []
-
-        while len(encpkt)>0:
-            length = int(self.flipEndian(encpkt[:6]),16)
-            lengths.append(length)
-            payloads.append(encpkt[8:8+(length*2)])
-            encpkt = encpkt[8+(length*2):]
-
-        tlen=0
-        for l in lengths:
-            tlen+=l
-        tlen+= len(lengths)*4
-
-        #self.printLn("[*] Lengths & tlen:\t%s; %s"%(lengths,tlen))
-        #self.printLn("[*] Payloads:\t%s"%payloads)
-        #for p in payloads:
-        #    #self.printLn("[*] ASCII:\t%s"%self.readable(p))
-
-        if tlen == pktlen and len(payloads) > 0:
-            if self.isMySqlReq(payloads):
-                pktType = MYSQLREQ
-            elif self.isMySqlResp(payloads):
-                pktType = MYSQLRESP
-            else: #possibly MySQL, cannot determine right now
-                pktType = MYSQL
-        else: #not a MySQL pkt
-            pktType = UNKNOWN
-
-        return pktType
-
-    def isMySqlReq(self,payloads):
-        if payloads[0] == '0e': #COM_PING
-            return True
-
-    def getMysqlCols(self,payloads):
-        c = -1 #ignore first payload
-        for p in payloads:
-            if p == "fe00002200":
-                return c
-            else:
-                c+=1
-
-    def isMySqlResp(self,payloads):
-        if payloads[0] == '00000002000000': #OK RESP 
-            return True
-        elif payloads[0][:2] == 'ff': #ERR RESP
-            return True
-        elif len(payloads[0]) == 2 and int(payloads[0], 16) == self.getMysqlCols(payloads): #Query RESP
-            return True
 
     def isSqlServ(self,payload):
         return UNKNOWN
@@ -213,12 +148,6 @@ class Parse(threading.Thread):
 
     def isSqlServResp(self,payload):
         return False
-
-    def flipEndian(self,data):
-        resp=''
-        for i in range(0,len(data),2):
-            resp = data[i]+data[i+1]+resp
-        return resp
 
     def inConn(self,c,pkt):
         #self.printLn("[*] Comparing pkt with known conns:")
@@ -310,9 +239,13 @@ class Parse(threading.Thread):
         
         if c:
             if pkt[TCP].seq != c.nextseq: #probably pkt retransmission
+                self.printLn("[*] pkt retransmission detected: seq;nextseq - %s;%s"%(pkt[TCP].seq,c.nextseq))
                 return
 
+            self.printLn("[*] valid pkt: seq;nextseq - %s;%s"%(pkt[TCP].seq,c.nextseq))
+
             if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set, is a fragged pkt
+                self.printLn("[*] Fragged pkt detected")
                 c.nextseq = len(pkt[TCP].payload)+c.nextseq
                 c.frag.append(pkt)
             else:
@@ -345,69 +278,11 @@ class Parse(threading.Thread):
     def printLn(self,msg):
         with open('out.txt','a') as f:
             f.write(msg+'\n')
+            #f.write('\n')
 
     #calls to store() uses old method; need to change to new params
     #if database can be determined, create db if it doesn't exist or point to existing db
     #if user can be determined, update db.users
-    def parseMySqlReq(self,data,conn):
-        #self.printLn("\n--MySQL Req--\n")
-        #self.printLn("Payload len:\t%s"%len(data))
-        #self.printLn('[*] ASCII:\t%s'%self.readable(str(data).encode('hex')))
-        data = data.encode('hex')
-        pktlen = len(data)/2
-        lengths = []
-        ret = ''
-        while len(data)>0:
-            length = int(self.flipEndian(data[:6]),16)
-            lengths.append(length)
-            #self.printLn("SubPacket Raw:\t%s"%data[8:8+(length*2)])
-            #self.printLn("SubPacket ASCII:\t%s"%self.readable(data[8:8+(length*2)]))
-            ret += self.readable(data[8:8+(length*2)])
-            data = data[8+(length*2):]
-        #self.store(parseddata,MYSQLREQ,conn)    
-        #data = data.encode('hex')
-        self.store(ret,MYSQLREQ,conn)      
-
-    def parseMySqlResp(self,data,conn):
-        resp = ''
-        #self.printLn("\n--MySQL Resp--\n")
-        #self.printLn("Payload len:\t%s"%len(data))
-        #self.printLn('[*] ASCII:\t%s'%self.readable(str(data).encode('hex')))
-        encdata = data.encode('hex')
-        pktlen = len(encdata)/2
-        lengths=[]
-        while len(encdata)>0:
-            length = int(self.flipEndian(encdata[:6]),16)
-            lengths.append(length)
-            #self.printLn("SubPacket Raw:\t%s"%encdata[8:8+(length*2)])
-            #self.printLn("SubPacket ASCII:\t%s"%self.readable(encdata[8:8+(length*2)]))
-            encdata = encdata[8+(length*2):]
-
-        ret = ''
-        res = connections.MySQLResult(connections.Result(data))
-        try:
-            res.read()
-            #self.printLn('[*] Message:\t%s'%str(res.message))
-            #self.printLn('[*] Description:\t%s'%str(res.description))
-            #self.printLn('[*] Rows:')
-            #if res.rows and len(res.rows)>0:
-            #    for r in res.rows:
-                    #self.printLn(self.formatTuple(r))
-            if res.message and len(res.message) > 0:
-                ret += '\tMessages:'
-                for m in res.message:
-                    ret += '\t\t%s\n'%m
-            if res.description and len(res.description) > 0:
-                ret += '\tDescription:\t%s\n'%str(res.description)
-            if res.rows and len(res.rows)>0:
-                ret += '\tResult:\n'
-                for r in res.rows:
-                    ret += "\t\t%s\n"%str(r)
-        except:
-            #self.printLn('[!] Error:\t%s'%sys.exc_info()[1])
-            ret += '\tError:\t%s\n'%sys.exc_info()[1]
-        #self.printLn('[*] Raw:\t%s\n'%str(data).encode('hex'))
-        self.store(ret,MYSQLRESP,conn)
 
     def parseSqlServReq(self,pkt,conn):
     	data = str(pkt[TCP])[20:].encode('hex')
