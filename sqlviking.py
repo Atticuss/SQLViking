@@ -134,10 +134,8 @@ class Parse(threading.Thread):
                 pktType = MYSQLREQ
 
         if pktType == MYSQLREQ:
-            self.printLn('[*] Mysql Req:\n%s'%self.readable(payload.encode('hex')))
             self.store(mysql.parseReq(payload,conn),MYSQLREQ,conn)
         elif pktType == MYSQLRESP:
-            self.printLn('[*] Mysql Resp:\n%s'%self.readable(payload.encode('hex')))
             self.store(mysql.parseResp(payload,conn),MYSQLRESP,conn)
         elif pktType == SQLSERVREQ:
             self.parseSqlServReq(payload,conn)
@@ -180,15 +178,11 @@ class Parse(threading.Thread):
         if db:
             if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port: #isReq
                 c = Conn(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,nextcseq=len(pkt[TCP].payload)+pkt[TCP].seq,db=db)
-                self.printLn("[1] Creating conn: cport;sport - %s;%s"%(pkt[TCP].sport,pkt[TCP].dport))
             elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port: #isResp
                 c = Conn(pkt[IP].dst,pkt[TCP].dport,pkt[IP].src,pkt[TCP].sport,nextsseq=len(pkt[TCP].payload)+pkt[TCP].seq,db=db)
-                self.printLn("[2] Creating conn: cport;sport - %s;%s"%(pkt[TCP].dport,pkt[TCP].sport))
         else:
             c = Conn(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,nextcseq=pkt[TCP].seq+1)
-            self.printLn("[3] Creating conn: cport;sport - %s;%s"%(pkt[TCP].sport,pkt[TCP].dport))
 
-        #self.printLn("[*] Creating conn: seq;nextseq;len - %s;%s:%s"%(pkt[TCP].seq,len(pkt[TCP].payload)+pkt[TCP].seq,len(pkt[TCP].payload)))
         self.knownConns.append(c) 
         return c   	
 
@@ -210,14 +204,11 @@ class Parse(threading.Thread):
             return
 
         c = self.getConn(pkt)
-        if not c:
-            self.printLn("[*] Packet not part of known conn")
 
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
             self.delConn(c)
             return    
         elif pkt[TCP].flags == 2 and not c: #SYN pkt
-            self.printLn("[*] SYN pkt detected: seq;ack - %s;%s"%(pkt[TCP].seq,pkt[TCP].ack))
             c = self.addConn(pkt)
             c.nextcseq = pkt[TCP].seq+1
             return
@@ -232,9 +223,6 @@ class Parse(threading.Thread):
                 c = self.addConn(pkt,db)
 
         ip, port, dbType = None, None, None
-        #if not c and pkt[TCP].flags == 2: #SYN pkt; src is client, dst is serv
-        #    self.printLn("[*] SYN pkt detected")
-        #    c = self.addConn(pkt)
 
         if not c or c.db == UNKNOWN:
             pktType = self.fingerprint(str(pkt[TCP].payload))
@@ -260,19 +248,13 @@ class Parse(threading.Thread):
         
         if c:
             if pkt[IP].src == c.cip and pkt[TCP].sport == c.cport and c.nextcseq != -1 and c.nextcseq != pkt[TCP].seq: #is a bad req
-                self.printLn("[*] req pkt retransmission detected: seq;nextseq;len - %s;%s;%s"%(pkt[TCP].seq,c.nextcseq,len(pkt[TCP].payload)))
                 return
             elif pkt[IP].dst == c.cip and pkt[TCP].dport == c.cport and c.nextsseq != -1 and c.nextsseq != pkt[TCP].seq: #is a bad resp
-                self.printLn("[*] resp pkt retransmission detected: seq;nextseq;len - %s;%s;%s"%(pkt[TCP].seq,c.nextsseq,len(pkt[TCP].payload)))
                 return
 
-            self.printLn("[*] valid pkt: seq;len;flags - %s;%s;%s"%(pkt[TCP].seq,len(pkt[TCP].payload),pkt[TCP].flags))
-
-            if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set, is a fragged pkt. this breaks on boxes hosting both client and server. 
-                self.printLn("[*] Fragged pkt detected")
+            if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set, is a fragged pkt. this breaks on data sent over lo interface. scapy does not seem to handle len(pkt)>MTU well. 
                 c.frag.append(pkt)
             else:
-                #c.nextseq = pkt[TCP].ack
                 if len(c.frag) > 0:
                     for p in c.frag:
                         pkts.append(p)
@@ -368,8 +350,8 @@ class Scout(threading.Thread):
         global pkts
         while not self.die:
             try:
-                #sniff(prn=lambda x: pkts.put(x),filter="tcp",store=0,timeout=5)
-                sniff(prn=self.queuePkt,filter="tcp",store=0,timeout=5)
+                sniff(prn=lambda x: pkts.put(x),filter="tcp",store=0,timeout=5)
+                #sniff(prn=self.queuePkt,filter="tcp",store=0,timeout=5)
             except:
                 print sys.exc_info()[1]
                 self.die = True

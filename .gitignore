@@ -1,3 +1,4 @@
+databases/*.pyc
 databases/pymysql/*.pyc
 databases/pymysql/constants/*.pyc
 pytds/*.pyc
