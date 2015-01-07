@@ -3,3 +3,7 @@ databases/pymysql/*.pyc
 databases/pymysql/constants/*.pyc
 databases/pytds/*.pyc
 *.txt
+.vagrant
+NDP451-KB2858728-x86-x64-AllOS-ENU.exe
+SQLEXPRWT_x64_ENU.exe
+

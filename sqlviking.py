@@ -207,7 +207,7 @@ class Parse(threading.Thread):
 
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
             self.delConn(c)
-            return    
+            return
         elif pkt[TCP].flags == 2 and not c: #SYN pkt
             c = self.addConn(pkt)
             c.nextcseq = pkt[TCP].seq+1
@@ -318,9 +318,10 @@ class Parse(threading.Thread):
 
 class Scout(threading.Thread):
     def __init__(self):
+
         threading.Thread.__init__(self)
         self.die = False
-        
+
     def run(self):
         self.scout()
 
@@ -362,7 +363,7 @@ class Scout(threading.Thread):
     def printLn(self,msg):
         with open('out2.txt','a') as f:
             f.write(msg+'\n')
-    
+
 class Pillage(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
@@ -374,7 +375,7 @@ class Pillage(threading.Thread):
             if not queries.empty():
                 q = queries.get()
                 print('[*] Executing query:\t%s'%q[0])
-                print('[*] Targetting:\t%s'%q[1])
+                print('[*] Targeting:\t%s'%q[1])
 
 def writeResults(t):
     print('[*] Enter filepath to write to:')
@@ -407,7 +408,7 @@ def parseInput(input,t):
     elif input == 'q':
         raise KeyboardInterrupt
     else:
-        print('Unknown command entered')    
+        print('Unknown command entered')
 
 def wipeScreen():
     y,x = os.popen('stty size', 'r').read().split()
@@ -464,12 +465,13 @@ def main():
             t2.die = True
             t3.die = True
             break
+
         #except:
             #t1.die = True
             #t2.die = True
             #t3.die = True
             #print sys.exc_info()[1]
             #break
-    
+
 if __name__ == "__main__":
     main()
