@@ -18,43 +18,62 @@ if ! File.exists?('./SQLEXPRWT_x64_ENU.exe')
   exit 1
 end
 
-Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|  
-  #Setup Vulnerable Test App
-  config.vm.define :weakapp do |app|
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
-    app.vm.box = "ferventcoder/win2008r2-x64-nocm"
-    app.vm.guest = :windows
-    
+##########Setup Vulnerable Test App ###########
+
+  config.vm.define :weakapp do |app|
+    app.vm.box = "phusion/ubuntu-14.04-amd64"
+
     app.vm.provider "virtualbox" do |v|
+        v.gui = true
+    end
+
+    app.vm.network "private_network", ip: "192.168.123.10"
+    app.vm.network :forwarded_port, guest:4567, host:4567
+    app.vm.provision "shell", path: "vagrant-scripts/setup-weakapp.sh"
+  end
+
+########## Setup MSSQL Server ###########
+
+  config.vm.define :mssql do |sql|
+    sql.vm.box = "ferventcoder/win2008r2-x64-nocm"
+    sql.vm.guest = :windows
+
+    sql.vm.provider "virtualbox" do |v|
       v.gui = true
     end
 
-    app.vm.communicator = "winrm"
-    
-    app.vm.network "private_network", ip: "s"
-    app.vm.network :forwarded_port, guest: 85, host: 85
-    app.vm.network :forwarded_port, guest: 3389, host: 1234
-    app.vm.network :forwarded_port, guest: 5985, host: 5985, id: "winrm", auto_correct: true
-   
-    # .NET 4.5
-    app.vm.provision :shell, path: "vagrant-scripts/install-dot-net.ps1"  
-    app.vm.provision :shell, path: "vagrant-scripts/install-dot-net-45.cmd" 
-    
+    sql.vm.communicator = "winrm"
+
+    sql.vm.network "private_network", ip: "192.168.123.11"
+    sql.vm.network :forwarded_port, guest: 3389, host: 1235
+    sql.vm.network :forwarded_port, guest: 5985, host: 5986, id: "winrm", auto_correct: true
+
     # Database
-    app.vm.provision :shell, path: "vagrant-scripts/install-sql-server.cmd" 
-    app.vm.provision :shell, path: "vagrant-scripts/configure-sql-server.ps1"  
-    
+    sql.vm.provision :shell, path: "vagrant-scripts/install-sql-server.cmd"
+    sql.vm.provision :shell, path: "vagrant-scripts/configure-sql-server.ps1"
+
     #Restore DB
-    app.vm.provision :shell, path: "vagrant-scripts/create-database.cmd"
-     
-    # IIS   
-    app.vm.provision :shell, path: "vagrant-scripts/install-iis.cmd"
-      
-    #Create Website
-    app.vm.provision :shell, path: "vagrant-scripts/create-website-folder.ps1"
-    app.vm.provision :shell, path: "vagrant-scripts/creating-website-in-iis.cmd"
+    sql.vm.provision :shell, path: "vagrant-scripts/create-database.cmd"
 
   end
+
+########## Setup MySQL ###############
+  config.vm.define :mysql do |mysql|
+      mysql.vm.box = "phusion/ubuntu-14.04-amd64"
+
+      mysql.vm.provider "virtualbox" do |v|
+        v.gui = true
+      end
+
+      mysql.vm.network "private_network", ip: "192.168.123.13"
+      mysql.vm.network :forwarded_port, guest:4567, host:4567
+      mysql.vm.provision "shell", path: "vagrant-scripts/setup-mysql.sh"
+
+  end
+
+########## Setup SQLViking ###########
 
   config.vm.define :sqlviking do |viking|
     viking.vm.box = "phusion/ubuntu-14.04-amd64"
@@ -63,7 +82,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       v.gui = true
     end
 
-    viking.vm.network "private_network", ip: "192.168.123.124"
+    viking.vm.network "private_network", ip: "192.168.123.12"
     viking.vm.provision "shell", path: "vagrant-scripts/setup-sqlviking.sh"
 
   end
