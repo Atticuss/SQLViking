@@ -2,5 +2,5 @@
 $ErrorActionPreference = "Stop"
 
 import-module servermanager
-echo "Enabling .NET Framework"
+echo "Installing .NET Framework"
 add-windowsfeature as-net-framework

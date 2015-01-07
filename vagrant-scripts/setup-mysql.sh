@@ -2,18 +2,11 @@
 
 sudo apt-get install git -y
 sudo apt-get install unzip -y
+sudo apt-get install debconf-utils -y
+echo "mysql-server-5.5 mysql-server/root_password password toor" | sudo debconf-set-selections
+echo "mysql-server-5.5 mysql-server/root_password_again password toor" | sudo debconf-set-selections
+sudo apt-get install mysql-server-5.5 -y
+sudo service mysql restart
 
-mkdir /opt/sqlviking
-cp -R /vagrant/* /opt/sqlviking/
-
-cd /tmp
-wget http://www.secdev.org/projects/scapy/files/scapy-2.3.0.zip
-unzip scapy-2.3.0.zip
-rm -rf scapy-2.3.0.zip
-cd scapy-2.*
-
-sudo chown -R vagrant:root /opt/sqlviking/
-sudo python setup.py install
-
-cd /opt/sqlviking
-
+mkdir /opt/sql/
+cp -R /vagrant/* /opt/sql/
