@@ -1,0 +1,8 @@
+development:
+  adapter: sqlserver
+  database: test-app
+  host: localhost
+  username: sa
+  password: '#SAPassword!'
+  pool: 15
+  timeout: 5000

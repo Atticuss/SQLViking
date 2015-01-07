@@ -45,7 +45,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
     sql.vm.communicator = "winrm"
     sql.vm.network "private_network", ip: "192.168.50.4"
-    sql.vm.network :forwarded_port, guest: 3389, host: 3389
+    sql.vm.network "forwarded_port", guest: 3389, host: 3389
 
     sql.vm.provision :shell, path: "vagrant-scripts/install-dot-net.ps1"
     sql.vm.provision :shell, path: "vagrant-scripts/install-sql-server.cmd"
