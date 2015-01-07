@@ -17,4 +17,4 @@ sudo apt-get install freetds-dev freetds-bin tdsodbc libmysqlclient-dev
 cd /opt/app
 git clone https://github.com/fidalgo/ruby-mssql-example
 
-cd /opt/app/ruby-mssql-example
+

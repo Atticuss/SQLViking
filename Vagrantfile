@@ -68,7 +68,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       end
 
       mysql.vm.network "private_network", ip: "192.168.123.13"
-      mysql.vm.network :forwarded_port, guest:4567, host:4567
       mysql.vm.provision "shell", path: "vagrant-scripts/setup-mysql.sh"
 
   end
