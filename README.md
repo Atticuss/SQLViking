@@ -13,3 +13,12 @@ MySQL parsing functionality forked from PyMySQL: https://github.com/PyMySQL
 Currently only functional on Linux due to some hackery using sigs to make raw_input() non-blocking
 
 Requires: scapy, Python 2.7.x
+
+##Demo Environment
+```
+    Go to SQLViking Directory:
+
+    vagrant up
+    vagrant ssh sqlviking
+    
+```

@@ -3,6 +3,7 @@ require "sinatra/activerecord"
 
 set :database_file, "./database.yml"
 set :bind, '0.0.0.0'
+set :daemon, true
 
 class Comment < ActiveRecord::Base
 end
