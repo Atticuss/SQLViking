@@ -1,8 +1,9 @@
 development:
-  adapter: sqlserver
+  adapter: mysql2
   database: test-app
-  host: localhost
-  username: sa
-  password: '#SAPassword!'
+  host: 127.0.0.1
+  port: 3306
+  username: root
+  password: toor
   pool: 15
   timeout: 5000
