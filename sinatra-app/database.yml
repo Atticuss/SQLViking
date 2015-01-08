@@ -1,9 +1,18 @@
-development:
-  adapter: mysql2
-  database: test-app
-  host: 127.0.0.1
-  port: 3306
-  username: root
-  password: toor
-  pool: 15
-  timeout: 5000
+##development:
+  ##adapter: sqlserver
+  ##database: test-app
+  ##host: localhost
+  ##username: sa
+  ##password: '#SAPassword!'
+  ##pool: 15
+  ##timeout: 5000
+
+ development:
+   adapter: mysql2
+   database: test-app
+   host: 192.168.123.13
+   port: 3306
+   username: root
+   password: toor
+   pool: 15
+   timeout: 5000
