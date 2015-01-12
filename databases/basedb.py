@@ -4,6 +4,10 @@ class BaseDB():
     __metaclass__ = abc.ABCMeta
 
     @abc.abstractmethod
+    def encodeQuery(self,query):
+        return
+
+    @abc.abstractmethod
     def isDB(self, payload):
         return
 
