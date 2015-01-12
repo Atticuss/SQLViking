@@ -12,7 +12,10 @@ class MySqlDB(BaseDB):
         pass
 
     def encodeQuery(self,query):
-        length = '240000'
+        length = hex(len(query)+1)[2:]
+        if len(length)%2 == 1:
+            length = '0'+length
+        length = self.flipEndian(length)+'0'*(6-len(length))
         return (length+'0003').decode('hex')+query
 
     def getPayloads(self,data):

