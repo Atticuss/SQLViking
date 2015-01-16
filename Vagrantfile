@@ -66,7 +66,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       mysql.vm.network "private_network", ip: "192.168.123.13"
       mysql.vm.network :forwarded_port, guest: 3306, host: 3306
       mysql.vm.provision "shell", path: "vagrant-scripts/setup-mysql.sh"
-      #NEED TO CHANGE BIND ADDRESS >.<
 
   end
 
@@ -77,6 +76,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
     viking.vm.provider "virtualbox" do |v|
       v.gui = true
+      v.customize ["modifyvm", :id, "--nicpromisc1", "allow-all"]
+      v.customize ["modifyvm", :id, "--nicpromisc2", "allow-all"]
     end
 
     viking.vm.network "private_network", ip: "192.168.123.12"
