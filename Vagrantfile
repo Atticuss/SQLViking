@@ -26,7 +26,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     app.vm.box = "phusion/ubuntu-14.04-amd64"
 
     app.vm.provider "virtualbox" do |v|
-        v.gui = true
+        #v.gui = true
+        v.name = "(SQLVIKING) Comment Application"
     end
 
     app.vm.network "private_network", ip: "192.168.123.10"
@@ -40,11 +41,12 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     sql.vm.box = "ferventcoder/win2008r2-x64-nocm"
     sql.vm.guest = :windows
     sql.vm.provider "virtualbox" do |v|
-      v.gui = true
+      #v.gui = true
+      v.name = "(SQLVIKING) Microsoft SQL Server"
     end
 
     sql.vm.communicator = "winrm"
-    sql.vm.network "private_network", ip: "192.168.50.4"
+    sql.vm.network "private_network", ip: "192.168.123.11"
     sql.vm.network "forwarded_port", guest: 3389, host: 3389
     sql.vm.network "forwarded_port", guest: 1433, host: 1433
 
@@ -60,7 +62,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       mysql.vm.box = "phusion/ubuntu-14.04-amd64"
 
       mysql.vm.provider "virtualbox" do |v|
-        v.gui = true
+        #v.gui = true
+        v.name = "(SQLVIKING) MySQL Server"
       end
 
       mysql.vm.network "private_network", ip: "192.168.123.13"
@@ -75,7 +78,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     viking.vm.box = "phusion/ubuntu-14.04-amd64"
 
     viking.vm.provider "virtualbox" do |v|
-      v.gui = true
+      #v.gui = true
+      v.name = "(SQLVIKING) SQLViking"
       v.customize ["modifyvm", :id, "--nicpromisc1", "allow-all"]
       v.customize ["modifyvm", :id, "--nicpromisc2", "allow-all"]
     end

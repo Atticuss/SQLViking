@@ -19,16 +19,12 @@ Requires: scapy, Python 2.7.x
 ```bash
 vagrant box add phusion/ubuntu-14.04-amd64
 cd $SQLVIKING_HOME
-vagrant up mysql weakapp
-```
-(open a new terminal window)
-```bash
-vagrant up sqlviking
+vagrant up sqlviking mysql weakapp
 ```
 
 Once these three VMs are running, the weak application should be available for submitting requests. Check this in your browser by navigating to `localhost:4567`.
 
-Once you've verified the weak application is running, start up SQLViking
+(open a new terminal window)
 ```bash
 vagrant ssh sqlviking
 ```
@@ -36,7 +32,9 @@ vagrant ssh sqlviking
 Inside of the sqlviking VM
 ```bash
 vagrant@ubuntu-14:/opt/sqlviking$      cd /opt/sqlviking
-vagrant@ubuntu-14:/opt/sqlviking$      python sqlviking.py
+vagrant@ubuntu-14:/opt/sqlviking$      sudo python sqlviking.py
 ```
 
-
+##Common Issues
+###SQLViking isn't picking anything up :(
+Make sure you ran sqlviking with `sudo` or it won't work properly because scapy doesn't have the appropriate access to the network interface
