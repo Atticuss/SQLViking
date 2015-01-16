@@ -21,6 +21,7 @@ vagrant box add phusion/ubuntu-14.04-amd64
 cd $SQLVIKING_HOME
 vagrant up sqlviking mysql weakapp
 ```
+#####NOTE: We're having some trouble getting the background process to function properly on the web app, so if you run it in the order above the weakapp will run last. The server will be running correctly upon deployment:
 
 Once these three VMs are running, the weak application should be available for submitting requests. Check this in your browser by navigating to `localhost:4567`.
 

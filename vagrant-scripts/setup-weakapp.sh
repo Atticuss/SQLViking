@@ -18,8 +18,8 @@ bundle install
 rake db:create
 rake db:migrate
 rake db:seed
-weakapp="ruby app.rb"
-$weakapp &
+cmd="ruby app.rb &"
+$cmd
 
 
 
