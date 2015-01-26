@@ -13,9 +13,24 @@
 
 ActiveRecord::Schema.define(version: 20140913010102) do
 
+  create_table "accounts", force: true do |t|
+    t.string  "name"
+    t.decimal "balance", precision: 10, scale: 0
+    t.string  "status"
+    t.text    "notes"
+  end
+
   create_table "comments", force: true do |t|
     t.string "name"
     t.text   "message"
+  end
+
+  create_table "users", force: true do |t|
+    t.string "name"
+    t.string "email"
+    t.string "gender"
+    t.string "password"
+    t.string "password_confirmation"
   end
 
 end
