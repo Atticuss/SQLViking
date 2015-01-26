@@ -12,11 +12,20 @@ databaseList = {MYSQL:mysql.MySqlDB(), SQLSERV:sqlserver.SqlServerDB()}
 pkts=Queue()
 queries=Queue()
 
+class BadIPError(Exception):
+    pass
+
+class BadPortError(Exception):
+    pass
+
+class BadDbTypeError(Exception):
+    pass
+
 class Traffic():
-	def __init__(self,query=None,result=None):
-		self.query = query
-		self.result = result
-		self.timestamp = datetime.datetime.now()
+    def __init__(self,query=None,result=None):
+        self.query = query
+        self.result = result
+        self.timestamp = datetime.datetime.now()
 
 class Conn():
     def __init__(self,cip,cport,sip,sport,state,nextcseq=-1,nextsseq=-1,db=UNKNOWN):
@@ -77,7 +86,7 @@ class DataBase():
         else:
             res += "no users identified yet\n"
         res += "Schema:\t%s\n"%self.getSchemas()
-        res += "\nIdentified traffic:\n"
+        res += "\nCaptured traffic:\n"
         for t in self.traffic:
             res += 'Query:\n\t%s\n'%t.query
             res += 'Response:\n%s\n'%t.result
@@ -110,6 +119,12 @@ class Parse(threading.Thread):
         with open(outfile,'a') as f:
             for db in self.knownDBs:
                 f.write(db.status()+'\n'+'~'*80+'\n')
+
+    def getNumQueries(self):
+        l = 0
+        for db in self.knownDBs:
+            l += len(db.traffic)
+        return l
 
     def getNumConns(self):
         return len(self.knownConns)
@@ -163,7 +178,7 @@ class Parse(threading.Thread):
             c = Conn(pkt[IP].src,pkt[TCP].sport,pkt[IP].dst,pkt[TCP].dport,nextcseq=pkt[TCP].seq+1,state=state)
 
         self.knownConns.append(c) 
-        return c   	
+        return c    
 
     def delConn(self,conn):
         #curently unused as all traffic is tracked in db object, not conn
@@ -364,18 +379,6 @@ class Scout(threading.Thread):
         with open('out2.txt','a') as f:
             f.write(msg+'\n')
 
-class Pillage(threading.Thread):
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.die = False
-
-    def run(self):
-        global queries
-        while not self.die:
-            if not queries.empty():
-                q = queries.get()
-
-
 def writeResults(t):
     print('[*] Enter filepath to write to:')
     path = raw_input("> ")
@@ -394,18 +397,65 @@ def pillage():
     port = raw_input("> ")
     print('[*] Run "%s" against %s:%s? [y/n]'%(query,ip,port))
     ans = raw_input("> ")
-    if ans == 'y':
+    if ans == 'y' or ans == 'Y':
         queries.put([query,ip,port])
         print('[*] Query will run as soon as possible')
     else:
         print('[*] Cancelling...')
     time.sleep(3)
 
+def addDb(t):
+    ip = '-1'
+    port = '-1'
+    dbtype = '-1'
+
+    while(not isValidIP(ip)):
+        print('[*] Enter IP of DB')
+        ip = raw_input('> ')
+    while(not isValidPort(port)):
+        print('[*] Enter port of DB')
+        port = raw_input('> ')
+    while(not isValidDbType(dbtype)):
+        print('[*] Enter type of DB')
+        dbtype = raw_input('> ')
+
+    t.knownDBs.append(DataBase(ip=ip,port=port,dbType=dbtype))
+
+def isValidIP(ip):
+    if len(ip.split('.')) != 4:
+        print('1:\t%s'%ip)
+        return False
+    for oct in ip.split('.'):
+        try:
+            if int(oct) < 0 or int(oct) > 256:
+                print('2:\t%s'%oct)
+                return False
+        except ValueError:
+            return False
+    return True
+
+def isValidPort(port):
+    try:
+        if int(port) < 0 or int(port) > 65565:
+            return False
+    except ValueError:
+        return False
+    return True
+
+def isValidDbType(dbType):
+    try:
+        validDatabaseTypes[dbType]
+        return True
+    except KeyError:
+        return False
+
 def parseInput(input,t):
     if input == 'w':
         writeResults(t)
     elif input == 'r':
         pillage()
+    elif input == 'a':
+        addDb(t)
     elif input == 'q':
         raise KeyboardInterrupt
     else:
@@ -437,24 +487,57 @@ def printMainMenu(t,wipe=True):
     if wipe:
         wipeScreen()
         y,x = os.popen('stty size', 'r').read().split()
-    
+
     print('{{:^{}}}'.format(x).format('===Welcome to SQLViking==='))
     print('\n[*] Current number of known DBs:\t\t%s'%t.getNumDBs())
     print('[*] Current number of known connections:\t%s'%t.getNumConns())
+    print('[*] Current number of queries capured:\t\t%s'%t.getNumQueries())
     print('\n[*] Menu Items:')
     print('\tw - dump current results to file specified')
+    print('\ta - add new DB to track')
     print('\tr - run a query against a specified DB (not implemented yet)')
     print('\tq - quit')
 
+def isValidDbInfo(vals):
+    print('vals2:\t%s'%vals)
+    ip = vals[0]
+    port = vals[1]
+    dbtype = vals[2]
+
+    if not isValidIP(ip):
+        raise BadIPError
+    elif not isValidPort(port):
+        raise BadPortError
+    elif not isValidDbType(dbtype):
+        raise BadDbTypeError 
+
 def main():
-    #TODO: better menu. running counter of reqs/resps capped and DBs discovered.
+    #TODO: better menu.
 
     t1 = Scout()
     t2 = Parse()
-    #t3 = Pillage()
     t1.start()
     t2.start()
-    #t3.start()
+
+    if len(sys.argv) > 1:
+        with open(sys.argv[1],'r') as f:
+            try:
+                for l in f:
+                    vals = l.strip().split(':')
+                    print('l:\t%s'%l)
+                    print('vals:\t%s'%vals)
+                    isValidDbInfo(vals)
+                    t2.knownDBs.append(DataBase(ip=vals[0],port=vals[1],dbType=validDatabaseTypes[vals[2]]))
+            except BadIPError:
+                print('Bad IP value found on line:\t%s'%l)
+                time.sleep(5)
+            except BadPortError:
+                print('Bad port value found on line:\t%s'%l)
+                time.sleep(5)
+            except BadDbTypeError:
+                print('Bad DB type found on line:\t%s'%l)
+                print('Valid DB types:\t%s'%validDatabaseTypes)
+                time.sleep(5)
 
     while True:
         printMainMenu(t2)
@@ -464,15 +547,14 @@ def main():
             print('\n[!] Shutting down...')
             t1.die = True
             t2.die = True
-            #t3.die = True
             break
-
-        #except:
-            #t1.die = True
-            #t2.die = True
-            #t3.die = True
-            #print sys.exc_info()[1]
-            #break
+        except:
+            t1.die = True
+            t2.die = True
+            print sys.exc_info()[1]
+            break
 
 if __name__ == "__main__":
     main()
+
+#adding new DataBases uses string instead of enum

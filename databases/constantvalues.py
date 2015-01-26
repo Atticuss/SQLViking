@@ -16,3 +16,5 @@ ISSQLSERV = lambda x: x % SQLSERV == 0
 
 HANDSHAKE   = 1
 ESTABLISHED = 2
+
+validDatabaseTypes = {'MYSQL':MYSQL,'SQLSERV':SQLSERV}
