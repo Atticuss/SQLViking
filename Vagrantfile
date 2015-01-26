@@ -32,6 +32,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
     app.vm.network "private_network", ip: "192.168.123.10"
     app.vm.network :forwarded_port, guest:4567, host:4567
+    app.vm.provision "shell", path: "vagrant-scripts/prepare-weakapp.sh"
     app.vm.provision "shell", path: "vagrant-scripts/setup-weakapp.sh"
   end
 

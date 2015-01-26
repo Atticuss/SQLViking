@@ -1,5 +1,6 @@
 require 'sidekiq'
 require 'sinatra'
+require 'sinatra/base'
 require "sinatra/activerecord"
 
 # Server/DB setup #
@@ -18,11 +19,8 @@ end
 class Account < ActiveRecord::Base
 end
 
-# Sidekiq to Mimic Users #
-
 class UserMimic
 	include Sidekiq::Worker
-
 	def perform(name, count)
 		User.all
 		sleep(5.seconds)
@@ -39,25 +37,28 @@ class UserMimic
 		sleep(5.seconds)
 	end
 end
+# Sidekiq to Mimic Users #
 
-# Routing #
-get '/' do
-  @comments = Comment.all
-  erb :index
-end
+class WeakApp < Sinatra::Base
+	# Routing #
+	get '/' do
+	  @comments = Comment.all
+	  erb :index
+	end
 
-post '/' do
-  Comment.create!(
-    name:    params[:name],
-    message: params[:message]
-  )
-  redirect '/'
-end
+	post '/' do
+	  Comment.create!(
+	    name:    params[:name],
+	    message: params[:message]
+	  )
+	  redirect '/'
+	end
 
-# App with User mimic function running #
+	# App with User mimic function running #
 
-get '/usermimic' do
-	@comments = Comment.all
-	UserMimic.perform_async('name', 3)
-	erb :index
+	get '/usermimic' do
+		@comments = Comment.all
+		UserMimic.perform_async('name', 3)
+		erb :index
+	end
 end
