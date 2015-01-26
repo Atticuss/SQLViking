@@ -24,10 +24,23 @@ class UserMimic
 	include Sidekiq::Worker
 
 	def perform(name, count)
-		@users = User.all
+		User.all
+		sleep(5.seconds)
+		Comment.all
+		sleep(5.seconds)
+		Account.all
+		sleep(5.seconds)
+		User.find(1)
+		sleep(5.seconds)
+		User.find_by(name: "Ken")
+		Comment.first
+		sleep(5.seconds)
+		Account.first
+		sleep(5.seconds)
 	end
 end
 
+# Routing #
 get '/' do
   @comments = Comment.all
   erb :index
