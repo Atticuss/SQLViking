@@ -16,3 +16,13 @@
    password: toor
    pool: 15
    timeout: 5000
+
+ production:
+   adapter: mysql2
+   database: weakapp
+   host: 192.168.123.13
+   port: 3306
+   username: root
+   password: toor
+   pool: 15
+   timeout: 5000

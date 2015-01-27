@@ -9,8 +9,8 @@ redis-server &
 cd /opt/weakapp
 rvm use 2.0.0
 bundle install
-bundle exec sidekiq -r ./app.rb &
+bundle exec sidekiq -d -r ./app.rb
 rake db:create
 rake db:migrate
 rake db:seed
-rackup -D -p 4567
+rackup -p 4567

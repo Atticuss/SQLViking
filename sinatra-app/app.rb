@@ -21,20 +21,22 @@ end
 
 class UserMimic
 	include Sidekiq::Worker
-	def perform(name, count)
-		User.all
+	def perform()
+		puts User.all
 		sleep(5.seconds)
-		Comment.all
+		puts Comment.all
 		sleep(5.seconds)
-		Account.all
+		puts Account.all
 		sleep(5.seconds)
 		User.find(1)
 		sleep(5.seconds)
-		User.find_by(name: "Ken")
-		Comment.first
+		user = User.find_by(name: "Ken")
+		puts user
+		puts Comment.first
 		sleep(5.seconds)
-		Account.first
+		puts Account.first
 		sleep(5.seconds)
+		Comment.create(name: "Go Team", message: "Win Win")
 	end
 end
 # Sidekiq to Mimic Users #
@@ -58,7 +60,7 @@ class WeakApp < Sinatra::Base
 
 	get '/usermimic' do
 		@comments = Comment.all
-		UserMimic.perform_async('name', 3)
+		UserMimic.perform_async()
 		erb :index
 	end
 end
