@@ -46,3 +46,5 @@ vagrant@ubuntu-14:/opt/sqlviking$      sudo python sqlviking.py
 ##Common Issues
 ###SQLViking isn't picking anything up :(
 Make sure you ran sqlviking with `sudo` or it won't work properly because scapy doesn't have the appropriate access to the network interface
+###I can't inject in the vagrant environment
+We know. Scapy (the library we use for picking/putting packets on the wire) doesn't play nice with virtual interfaces. Working to resolve now.
