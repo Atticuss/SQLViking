@@ -1,6 +1,9 @@
 SQLViking
 =========
 
+##Is it working yet?
+Nope :( Sorry. In the middle of completely rewriting tool. Code is a complete mess right now. Stay tuned!
+
 ```sudo python sqlviking.py <KnownDatabases.txt> ```
 
 Tool is broken up into two pieces:
