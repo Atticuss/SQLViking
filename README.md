@@ -1,9 +1,6 @@
 SQLViking
 =========
 
-##Is it working yet?
-Nope :( Sorry. In the middle of completely rewriting tool. Code is a complete mess right now. Stay tuned!
-
 ```sudo python sqlviking.py <KnownDatabases.txt> ```
 
 Tool is broken up into two pieces:
@@ -47,6 +44,8 @@ vagrant@ubuntu-14:/opt/sqlviking$      sudo python sqlviking.py
 ```
 
 ##Common Issues
+###Is it working yet?
+Nope :( Sorry. In the middle of completely rewriting tool. Code is a complete mess right now. Stay tuned!
 ###SQLViking isn't picking anything up :(
 Make sure you ran sqlviking with `sudo` or it won't work properly because scapy doesn't have the appropriate access to the network interface
 ###I can't inject in the vagrant environment
