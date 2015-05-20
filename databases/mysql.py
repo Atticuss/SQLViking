@@ -79,7 +79,9 @@ class MySqlDB(BaseDB):
     #if user can be determined, update db.users
 
     def parseReq(self,data,conn):
+        ret = []
         payloads = self.getPayloads(data)
+
         if conn.state == HANDSHAKE: #parse login pkt
             p = payloads[0][64:] #assumes HandshakeResponse41, no check for HandshakeResponse320. should be fine, 4.1 was released 2004. doubt any dbs are on a decade old version.
             username = ''
@@ -93,25 +95,26 @@ class MySqlDB(BaseDB):
             conn.state = ESTABLISHED
 
         if payloads[0][:2] == COM_INIT_DB: #assumes schema is correct. no check for successful response from server
-            conn.db.addSchema(payloads[0][2:].decode('hex'))
-            return "Client request to use database:\t%s"%payloads[0][2:].decode('hex')
+            conn.setInstance(payloads[0][2:].decode('hex'))
+            ret.append('Switched to instance:\t%s'%payloads[0][2:].decode('hex'))
+        else:
+            data = data.encode('hex')
+            pktlen = len(data)/2
+            lengths = []
 
-        data = data.encode('hex')
-        pktlen = len(data)/2
-        lengths = []
-        ret = ''
-        while len(data)>0:
-            length = int(self.flipEndian(data[:6]),16)
-            lengths.append(length)
-            ret += self.readable(data[8:8+(length*2)])
-            data = data[8+(length*2):]
+            while len(data)>0:
+                length = int(self.flipEndian(data[:6]),16)
+                lengths.append(length)
+                ret.append(self.readable(data[8:8+(length*2)]))
+                data = data[8+(length*2):]
         return ret    
 
     def parseResp(self,data,conn):
-        resp = ''
         encdata = data.encode('hex')
         pktlen = len(encdata)/2
-        lengths=[]
+        lengths = []
+        ret = []
+
         while len(encdata)>0:
             length = int(self.flipEndian(encdata[:6]),16)
             lengths.append(length)
@@ -119,24 +122,21 @@ class MySqlDB(BaseDB):
 
         payloads = self.getPayloads(data)
         if payloads[0] == '00000002000000': #OK resp
-            return '\tServer OK response\n'
-
-        ret = ''
-        res = connections.MySQLResult(connections.Result(data))
-        try:
-            res.read()
-            if res.message and len(res.message) > 0:
-                ret += '\tMessages:'
-                for m in res.message:
-                    ret += '\t\t%s\n'%m
-            if res.description and len(res.description) > 0:
-                ret += '\tDescription:\t%s\n'%str(res.description)
-            if res.rows and len(res.rows)>0:
-                ret += '\tResult:\n'
-                for r in res.rows:
-                    ret += "\t\t%s\n"%str(r)
-        except:
-            ret += '\tError:\t%s\n'%sys.exc_info()[1]
+            ret.append('Server OK response')
+        else:
+            res = connections.MySQLResult(connections.Result(data))
+            try:
+                res.read()
+                if res.message and len(res.message) > 0:
+                    for m in res.message:
+                        ret.append(m)
+                if res.description and len(res.description) > 0:
+                    ret.append(str(res.description))
+                if res.rows and len(res.rows)>0:
+                    for r in res.rows:
+                        ret.append(str(r))
+            except:
+                ret.append(sys.exc_info()[1])
         return ret
 
     def getMysqlCols(self,payloads):
