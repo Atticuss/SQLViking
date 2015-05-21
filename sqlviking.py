@@ -48,18 +48,24 @@ class Conn():
     def foundCol(self,tableName,colName):
         self.db.currentInstance.addColumn(tableName,colName)
 
+    def foundUser(self,user):
+        self.db.addCredentials(user=user)
+
+    def foundPassword(self,user,pw,salt='',scheme=''):
+        self.db.addCredentials(user,pw,salt,scheme)
+
 class Database():
     def __init__(self,dbType,ip,port):
         self.ip          = ip
         self.port        = port
         self.dbType      = dbType
         self.traffic     = []
-        self.credentials = [] # username/hash pairs
+        self.credentials = {} # {'username':['pw','salt','scheme']}
         self.instances   = {}
 
-    def addUser(self,u):
-        if u not in self.users:
-            self.users.append(u)
+    def addCredentials(self,user,pw='',salt='',scheme=''):
+        if user not in self.credentials:
+            self.credentials[user] = [pw,salt,scheme]
 
     #god i'm dumb. this logic should be moved out of database class; should return json formatted data. main thread can format into whatever format desired.
     def getTraffic(self,mode):
@@ -67,7 +73,7 @@ class Database():
             resp = '\n%s%s@%s:%s%s\n\n'%('-'*20,self.dbType,self.ip,self.port,'-'*20)
             resp += 'Credentials:\n'
             if len(self.credentials) > 0:
-                for u,p in self.credentials:
+                for u,p in self.credentials.iteritems():
                     resp += '\t%s : %s\n'%(u,p)
             else:
                 resp += 'No credentials harvested\n'
@@ -96,6 +102,7 @@ class Database():
                         resp += '%s\n'%r
                 else:
                     resp += 'None\n'
+            resp += '\n'*100
             return resp
         else:
             return 'Format not yet implemented\n\n'
@@ -259,6 +266,7 @@ class Parse(threading.Thread):
             return
         elif pkt[TCP].flags == 2: #SYN pkt
             c.nextcseq = pkt[TCP].seq+1
+            c.state = HANDSHAKE
             return
         
         #TODO: invesitgate this further; are these ACK pkts?

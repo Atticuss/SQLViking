@@ -91,7 +91,7 @@ class MySqlDB(BaseDB):
                 else:
                     break
                 p = p[2:]
-            conn.db.addUser(username)
+            conn.foundUser(username)
             conn.state = ESTABLISHED
 
         if payloads[0][:2] == COM_INIT_DB: #assumes schema is correct. no check for successful response from server
