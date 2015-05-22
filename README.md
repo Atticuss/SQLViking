@@ -45,8 +45,8 @@ vagrant@ubuntu-14:/opt/sqlviking$      sudo python sqlviking.py
 
 ##Common Issues
 ###Is it working yet?
-Nope :( Sorry. In the middle of completely rewriting tool. Code is a complete mess right now. Stay tuned!
+Actually, yes!
 ###SQLViking isn't picking anything up :(
-Make sure you ran sqlviking with `sudo` or it won't work properly because scapy doesn't have the appropriate access to the network interface
+Make sure you ran sqlviking with `sudo` or it won't work properly because scapy doesn't have the appropriate access to the network interface. Virtual interfaces run by virtualbox also don't seem to play nice with any kind of pcap tools including wireshark. Trying setting up a test box with VMWare instead.
 ###I can't inject in the vagrant environment
 We know. Scapy (the library we use for picking/putting packets on the wire) doesn't play nice with virtual interfaces. Working to resolve now.
