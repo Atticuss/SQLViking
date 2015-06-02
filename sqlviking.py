@@ -320,7 +320,6 @@ def parseConfig(f):
                             line))
                     sys.exit(1)
                 #dprint('[?] Parsing line for db info:\t%s'%l)
-                sys.exit(1)
                 dbQueue1.put(Database(
                     db_type,
                     ip.strip(),
