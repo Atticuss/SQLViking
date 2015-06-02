@@ -312,18 +312,25 @@ def parseConfig(f):
                 continue
 
             if current_section == "[Databases]":
-                line = line.split(':')
+                try:
+                    db_type, ip, port = line.split(':')
+                except:
+                    print("Check correctness of the settings file. "
+                          "Couldn't parse the follwing line:\n{}".format(
+                            line))
+                    sys.exit(1)
                 #dprint('[?] Parsing line for db info:\t%s'%l)
+                sys.exit(1)
                 dbQueue1.put(Database(
-                    line[0],
-                    line[1].strip(),
-                    int(line[2]))
-                )
+                    db_type,
+                    ip.strip(),
+                    int(port)
+                ))
                 dbQueue2.put(Database(
-                    line[0],
-                    line[1],
-                    line[2])
-                )
+                    db_type,
+                    ip,
+                    port
+                ))
             elif current_section == "[Injection]":
                 injectionQueue.put(line)
             elif current_section == "[Data]" or current_section == "[Misc]":
