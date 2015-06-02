@@ -296,40 +296,55 @@ def dprint(s):
         print(s)
 
 def parseConfig(f):
-    global dbs,toInject
     settings = {}
-    DATABASES = 0
-    INJECTION = 1
-    DATA = 2
-    MISC = 3
 
-    flag = -1
     with open(f,'r') as f:
-        for l in f:
-            l = l.strip().split('#')[0]
-            if len(l) == 0:
-                continue #donothing
-            elif '[Databases]' in l:
-                flag = DATABASES
-            elif '[Injection]' in l:
-                flag = INJECTION
-            elif '[Data]' in l:
-                flag = DATA
-            elif '[Misc]' in l:
-                flag = MISC
-            elif flag == DATABASES:
-                l = l.split(':')
+        for line in f:
+            line = line.split('#')[0].strip()
+            if len(line) == 0:
+                # Skip empty lines
+                continue
+
+            # Check if new settings section began
+            section_match = re.match("^\[[^\[\]]*\]$", line)
+            if section_match:
+                current_section = section_match.string
+                continue
+
+            if current_section == "[Databases]":
+                try:
+                    db_type, ip, port = line.split(':')
+                except:
+                    print("Check correctness of the settings file. "
+                          "Couldn't parse the follwing line:\n{}".format(
+                            line))
+                    sys.exit(1)
                 #dprint('[?] Parsing line for db info:\t%s'%l)
-                dbQueue1.put(Database(l[0],l[1].strip(),int(l[2])))
-                dbQueue2.put(Database(l[0],l[1],l[2]))
-            elif flag == INJECTION:
-                injectionQueue.put(l)
-            elif flag == DATA:
-                settings[l.split('=')[0].strip()] = l.split('=')[1].strip()
-            elif flag == MISC:
-                settings[l.split('=')[0].strip()] = l.split('=')[1].strip()
+                dbQueue1.put(Database(
+                    db_type,
+                    ip.strip(),
+                    int(port)
+                ))
+                dbQueue2.put(Database(
+                    db_type,
+                    ip,
+                    port
+                ))
+            elif current_section == "[Injection]":
+                injectionQueue.put(line)
+            elif current_section == "[Data]" or current_section == "[Misc]":
+                try:
+                    key, value = line.split('=')
+                except:
+                    print("Check correctness of the settings file. "
+                          "Couldn't parse the follwing line:\n{}".format(
+                            line))
+                    sys.exit(1)
+                
+                settings[key.strip()] = value.strip()
 
     return settings
+
 
 def isValidIP(ip):
     if len(ip.split('.')) != 4:
