@@ -2,6 +2,7 @@ from os import walk
 from operator import itemgetter
 from scapy.all import *
 from copy import deepcopy
+from json import dumps
 import sys, getopt, re, argparse, threading, datetime, signal, Queue
 sys.path.append("databases/")
 from constantvalues import *
@@ -89,7 +90,7 @@ class Database():
         data['credentials'] = self.credentials
         data['instances'] = deepcopy(self.instances)
         data['traffic'] = deepcopy(self.traffic)
-        
+
         return data
 
 class Instance():
@@ -407,6 +408,15 @@ def formatData(rawData,format):
                         data += '%s\n'%r
                 else:
                     data += 'None\n'
+    elif format.upper() == 'JSON':
+        for db in rawData:
+            for i in range(len(db['traffic'])):
+                db['traffic'][i] = vars(db['traffic'][i]) 
+            for i in range(len(db['instances'])):
+                for k,v in db['instances'][i].iteritems():
+                    db['instances'][i][k] = vars(v)
+        print('data: %s'%rawData)
+        data = dumps(rawData)
     return data
 
 def addDb(t):
